@@ -37,11 +37,29 @@ func Panel(cairn, key, dir string, close bool) error {
 		}
 	}
 	h, body := lookup(hosts, key)
+	return h.panel(body, watchCmd(cairn, key, dir), close)
+}
+
+// RexPanelLua is a Lua chunk that toggles the panel of the Rex block a key names, for an
+// init.lua action to run itself with loadstring. Run that way it needs no rex CLI, which
+// the bare environment Rex gives an action's programs can't find.
+func RexPanelLua(cairn, key, dir string, close bool) (string, error) {
+	if key == "" {
+		key = Pane()
+	}
+	if h, _ := lookup(hosts, key); h.name != rex.name || key == "" {
+		return "", fmt.Errorf("--lua needs a Rex block, not %q", key)
+	}
+	return rexScript(key, watchCmd(cairn, key, dir), close)
+}
+
+// watchCmd is the panel's command: `cairn watch <key>`, with the folder to fall back to.
+func watchCmd(cairn, key, dir string) []string {
 	watch := []string{cairn, "watch", key}
 	if dir != "" {
 		watch = append(watch, "--dir", dir)
 	}
-	return h.panel(body, watch, close)
+	return watch
 }
 
 // errNoPane is a panel's error for a key that names no pane in its host.
@@ -53,18 +71,30 @@ var rexPanelLua string
 // rexPanel floats the panel over the window holding the block, or closes the floating
 // layer that holds it. -b scopes the script to the block's session.
 func rexPanel(id string, watch []string, close bool) error {
-	block := "block:" + id
+	script, err := rexScript(id, watch, close)
+	if err != nil {
+		return err
+	}
+	_, err = cli(script, rexBin(), "do", "-", "-b", "block:"+id)
+	return err
+}
+
+// rexScript is panel.lua followed by its call for this block. The arguments travel as JSON
+// in a long bracket, which a value holding the bracket's close would end early.
+func rexScript(id string, watch []string, close bool) (string, error) {
 	args, err := json.Marshal(struct {
 		Block   string   `json:"block"`
 		Command []string `json:"command"`
 		Close   bool     `json:"close"`
 		Label   string   `json:"label"`
-	}{block, watch, close, panelTitle})
+	}{"block:" + id, watch, close, panelTitle})
 	if err != nil {
-		return err
+		return "", err
 	}
-	_, err = cli(rexPanelLua, "rex", "do", "-", "-b", block, "--args", string(args))
-	return err
+	if strings.Contains(string(args), "]==]") {
+		return "", fmt.Errorf("rex: can't pass %s to Lua", args)
+	}
+	return rexPanelLua + "return toggle(rex.json.decode([==[" + string(args) + "]==]))\n", nil
 }
 
 // tmuxPanel shows the panel in a popup over the pane. The popup is modal and q closes it,

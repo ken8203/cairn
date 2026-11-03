@@ -49,17 +49,42 @@ func TestRexPanel(t *testing.T) {
 	if err := Panel(cairn, "", "", true); err != nil {
 		t.Fatal(err)
 	}
-	wantLog(t, log(), `rex do - -b block:b1 --args {"block":"block:b1","command":["/opt/my bin/cairn","watch","b1"],"close":true,"label":"cairn"}`)
-	if b, _ := os.ReadFile(filepath.Join(dir, "stdin")); string(b) != rexPanelLua {
+	wantLog(t, log(), "rex do - -b block:b1")
+	want := rexPanelLua + `return toggle(rex.json.decode([==[{"block":"block:b1","command":["/opt/my bin/cairn","watch","b1"],"close":true,"label":"cairn"}]==]))` + "\n"
+	if b, _ := os.ReadFile(filepath.Join(dir, "stdin")); string(b) != want {
 		t.Errorf("rex read %q", b)
 	}
 
 	// The panel falls back to the caller's folder.
-	_, log = fakeCLIs(t, map[string]string{"rex": "cat > stdin"})
+	dir, _ = fakeCLIs(t, map[string]string{"rex": "cat > stdin"})
 	if err := Panel(cairn, "", "/w/my repo", false); err != nil {
 		t.Fatal(err)
 	}
-	wantLog(t, log(), `rex do - -b block:b1 --args {"block":"block:b1","command":["/opt/my bin/cairn","watch","b1","--dir","/w/my repo"],"close":false,"label":"cairn"}`)
+	if b, _ := os.ReadFile(filepath.Join(dir, "stdin")); !strings.Contains(string(b), `"command":["/opt/my bin/cairn","watch","b1","--dir","/w/my repo"],"close":false`) {
+		t.Errorf("rex read %q", b)
+	}
+}
+
+func TestRexPanelLua(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("REX_BLOCK", "block:b1")
+	got, err := RexPanelLua(cairn, "", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(got, rexPanelLua) || !strings.Contains(got, `"block":"block:b1"`) {
+		t.Errorf("RexPanelLua = %q", got)
+	}
+	if got2, _ := RexPanelLua(cairn, "b1", "", false); got2 != got {
+		t.Errorf("RexPanelLua for the named block = %q, want %q", got2, got)
+	}
+	if _, err := RexPanelLua(cairn, "tmux-1.2", "", false); err == nil {
+		t.Error("RexPanelLua for a tmux pane succeeded")
+	}
+	clearEnv(t)
+	if _, err := RexPanelLua(cairn, "", "", false); err == nil {
+		t.Error("RexPanelLua outside Rex succeeded")
+	}
 }
 
 func TestTmuxPanel(t *testing.T) {
@@ -201,7 +226,7 @@ func TestPanelError(t *testing.T) {
 func TestPanelForKey(t *testing.T) {
 	clearEnv(t)
 	tests := []struct{ key, want string }{
-		{"b1", `rex do - -b block:b1 --args {"block":"block:b1","command":["/opt/my bin/cairn","watch","b1"],"close":false,"label":"cairn"}`},
+		{"b1", "rex do - -b block:b1"},
 		{"tmux-4242.3", `tmux run-shell -b -t %3 'tmux' 'display-popup' '-E' '-w' '80%' '-h' '50%' '-t' '%3' ''\''/opt/my bin/cairn'\'' '\''watch'\'' '\''tmux-4242.3'\'''`},
 		{"herdr-v1.2.w1-p1.term_9", "herdr --session v1.2 pane list"},
 		{"hc-t3." + hcScope, "hc get cairn-t3 --json"},

@@ -2,6 +2,8 @@ package host
 
 import (
 	"cmp"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -228,5 +230,26 @@ func TestBodies(t *testing.T) {
 		if got := hcAddr(body); got != want {
 			t.Errorf("hcAddr(%q) = %q, want %q", body, got, want)
 		}
+	}
+}
+
+func TestRexBin(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("REX_BIN_DIR", dir)
+	if got, want := rexBin(), filepath.Join(dir, "rex"); got != want {
+		t.Errorf("rexBin() off PATH = %q, want %q", got, want)
+	}
+	t.Setenv("REX_BIN_DIR", "")
+	if got := rexBin(); got != "rex" {
+		t.Errorf("rexBin() without REX_BIN_DIR = %q, want rex", got)
+	}
+	onPath := t.TempDir()
+	if err := os.WriteFile(filepath.Join(onPath, "rex"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", onPath)
+	if got, want := rexBin(), filepath.Join(onPath, "rex"); got != want {
+		t.Errorf("rexBin() on PATH = %q, want %q", got, want)
 	}
 }
