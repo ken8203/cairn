@@ -68,7 +68,19 @@ const ttl = 60 * time.Second
 
 // where is what doctor reports about the terminal and agent session cairn runs in.
 func where(app ui.App) setup.Env {
-	return setup.Env{Host: host.Name, Pane: session.Pane, Agent: session.Agent, Trail: app.Sessions.Trail}
+	return setup.Env{Host: host.Name, Pane: session.Pane, Agent: session.Agent, Trail: app.Sessions.Trail, Orca: func() string { return orcaDetail(app) }}
+}
+
+// orcaDetail counts the Orca worktrees on trails, for doctor.
+func orcaDetail(app ui.App) string {
+	n, err := orca.Count(func(dir string) (orca.Card, bool) { return card(app, dir) })
+	switch {
+	case errors.Is(err, orca.ErrNotInstalled):
+		return "not installed"
+	case err != nil:
+		return "not reachable"
+	}
+	return fmt.Sprintf("%d worktrees on cairn trails", n)
 }
 
 // newApp wires cairn's home, its state and cache, to the real GitHub and terminal hosts.

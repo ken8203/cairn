@@ -87,6 +87,7 @@ var nowhere = Env{
 	Pane:  func() string { return "" },
 	Agent: func() string { return "" },
 	Trail: func(string) string { return "" },
+	Orca:  func() string { return "not installed" },
 }
 
 func agentCheck(name string) Check {
@@ -129,7 +130,7 @@ func TestDoctorPlugins(t *testing.T) {
 	for _, c := range Doctor(nowhere) {
 		names = append(names, c.Check)
 	}
-	if want := []string{"path", "gh", "codex-plugin", "codex-hooks", "host", "session"}; !slices.Equal(names, want) {
+	if want := []string{"path", "gh", "codex-plugin", "codex-hooks", "host", "session", "orca"}; !slices.Equal(names, want) {
 		t.Errorf("doctor without claude: %q", names)
 	}
 }
@@ -141,13 +142,14 @@ func TestDoctorWhere(t *testing.T) {
 		Pane:  func() string { return "p1" },
 		Agent: func() string { return "s1" },
 		Trail: func(id string) string { return "t-" + id },
+		Orca:  func() string { return "2 worktrees on cairn trails" },
 	}
 	cs := Doctor(env)
-	if got := cs[len(cs)-2:]; got[0].String() != "ok host: Rex, pane p1" || got[1].String() != "ok session: s1, on trail t-s1" {
+	if got := cs[len(cs)-3:]; got[0].String() != "ok host: Rex, pane p1" || got[1].String() != "ok session: s1, on trail t-s1" || got[2].String() != "ok orca: 2 worktrees on cairn trails" {
 		t.Errorf("got %v", got)
 	}
 	cs = Doctor(nowhere)
-	if got := cs[len(cs)-2:]; got[0].String() != "ok host: no terminal host with panes" || got[1].String() != "ok session: not in an agent session" {
+	if got := cs[len(cs)-3:]; got[0].String() != "ok host: no terminal host with panes" || got[1].String() != "ok session: not in an agent session" || got[2].String() != "ok orca: not installed" {
 		t.Errorf("got %v", got)
 	}
 }

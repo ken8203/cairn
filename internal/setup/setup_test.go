@@ -152,7 +152,7 @@ func TestSetupWithoutAgentsOrGh(t *testing.T) {
 	if !slices.Equal(got[1:], want) {
 		t.Errorf("setup:\n%s", strings.Join(got, "\n"))
 	}
-	if len(cs) != 4 || !Failed(cs) {
+	if len(cs) != 5 || !Failed(cs) {
 		t.Errorf("checks: %v", cs)
 	}
 }
