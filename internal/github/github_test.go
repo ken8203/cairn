@@ -118,6 +118,28 @@ func TestRefreshFetchesOnlyStale(t *testing.T) {
 	}
 }
 
+func TestFinishedPRsStayFresh(t *testing.T) {
+	c := Cache{Dir: t.TempDir(), TTL: time.Minute}
+	age := func(url string, d time.Duration) {
+		old := time.Now().Add(-d)
+		os.Chtimes(c.file(url), old, old)
+	}
+	open, merged, closed := "https://github.com/o/r/pull/1", "https://github.com/o/r/pull/2", "https://github.com/o/r/pull/3"
+	writeCache(t, c, open, PR{Number: 1, State: "OPEN"})
+	writeCache(t, c, merged, PR{Number: 2, State: "MERGED"})
+	writeCache(t, c, closed, PR{Number: 3, State: "CLOSED"})
+	age(open, 2*c.TTL)
+	age(merged, 1000*time.Hour)
+	age(closed, 2*c.TTL)
+	if c.Fresh(open) || !c.Fresh(merged) || !c.Fresh(closed) {
+		t.Errorf("fresh: open %v, merged %v, closed %v", c.Fresh(open), c.Fresh(merged), c.Fresh(closed))
+	}
+	age(closed, 2*closedTTL)
+	if c.Fresh(closed) {
+		t.Error("closed PR fresh past closedTTL")
+	}
+}
+
 func TestInfoUnknown(t *testing.T) {
 	c := Cache{Dir: t.TempDir()}
 	if got, want := c.Info("https://github.com/o/r/pull/42"), (PR{Number: 42, State: "UNKNOWN", CI: "none"}); got != want {
@@ -125,27 +147,32 @@ func TestInfoUnknown(t *testing.T) {
 	}
 }
 
-func TestExists(t *testing.T) {
-	known := "https://github.com/o/r/pull/1"
+func TestUnknown(t *testing.T) {
+	cached, known, unknown := "https://github.com/o/r/pull/1", "https://github.com/o/r/pull/2", "https://github.com/o/r/pull/404"
+	var asked [][]string
 	c := Cache{Dir: t.TempDir(), TTL: time.Minute, Query: func(urls []string) (map[string]PR, error) {
+		asked = append(asked, urls)
 		got := map[string]PR{}
 		if slices.Contains(urls, known) {
-			got[known] = PR{Number: 1, State: "OPEN"}
+			got[known] = PR{Number: 2, State: "OPEN"}
 		}
 		return got, nil
 	}}
-	if !c.Exists(known) {
-		t.Error("known PR missing")
+	writeCache(t, c, cached, PR{Number: 1, State: "OPEN"})
+	if got := c.Unknown(cached, known, unknown); !slices.Equal(got, []string{unknown}) {
+		t.Errorf("unknown = %v", got)
+	}
+	if len(asked) != 1 || !slices.Equal(asked[0], []string{known, unknown}) {
+		t.Errorf("asked %v", asked)
 	}
 	if _, ok := c.Read(known); !ok {
 		t.Error("known PR not cached")
 	}
-	unknown := "https://github.com/o/r/pull/404"
-	if c.Exists(unknown) {
-		t.Error("unknown PR exists")
-	}
 	if _, err := os.Stat(c.file(unknown)); err == nil {
 		t.Error("unknown PR got a cache file")
+	}
+	if got := c.Unknown(cached, known); len(got) != 0 || len(asked) != 1 {
+		t.Errorf("cached PRs: unknown %v, asked %v", got, asked)
 	}
 }
 

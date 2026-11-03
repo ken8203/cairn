@@ -37,6 +37,7 @@ type (
 		gen int
 		b   *board
 	}
+	cachedMsg struct{ b *board }
 	tickMsg   struct{ gen int }
 	editedMsg struct{}
 )
@@ -57,7 +58,18 @@ const (
 	altScrollOff = "\x1b[?1007l"
 )
 
-func (m *panel) Init() tea.Cmd { return tea.Batch(tea.Raw(altScrollOn), m.refresh(false)) }
+func (m *panel) Init() tea.Cmd { return tea.Batch(tea.Raw(altScrollOn), m.cached(), m.refresh(false)) }
+
+// cached reads the board from the cache alone, so the panel shows it while its first
+// refresh waits on GitHub.
+func (m *panel) cached() tea.Cmd {
+	target, dir, a := m.target, m.dir, m.app
+	return func() tea.Msg {
+		b := a.load(a.Find("", target, dir))
+		a.readPRs(b)
+		return cachedMsg{b}
+	}
+}
 
 func (m *panel) refresh(force bool) tea.Cmd {
 	m.gen++
@@ -92,6 +104,12 @@ func (m *panel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.layout()
+	case cachedMsg:
+		// A refresh that answered first is newer.
+		if m.b == nil {
+			m.b = msg.b
+			m.layout()
+		}
 	case refreshedMsg:
 		// A refresh superseded by a newer one is dropped; the newer one shows.
 		if msg.gen == m.gen {

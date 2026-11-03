@@ -190,7 +190,7 @@ func run(app ui.App, args []string) error {
 		if !ok || ref == "" {
 			return errors.New("usage: cairn link <step number> <owner/repo#n | PR URL>")
 		}
-		if !app.Cache.Exists(trail.URL(ref)) {
+		if len(app.Cache.Unknown(trail.URL(ref))) > 0 {
 			return fmt.Errorf("%s: no such PR", ref)
 		}
 		return synced(app, trails.Link(name, n, ref))
@@ -517,16 +517,21 @@ func runHook(app ui.App, in io.Reader, out io.Writer) {
 	}
 }
 
-// add appends steps to the trail, refusing a PR GitHub doesn't know before writing any.
+// add appends steps to the trail, refusing a PR GitHub doesn't know before writing any;
+// GitHub is asked about all of them at once.
 func add(app ui.App, name string, steps []string) error {
 	trails := app.Sessions.Trails
 	if _, err := trails.Create(name); err != nil {
 		return err
 	}
+	var urls []string
 	for _, s := range steps {
-		if ref := trail.ParseRef(trail.Clean(s)); ref != "" && !app.Cache.Exists(trail.URL(ref)) {
-			return fmt.Errorf("%s: no such PR", ref)
+		if ref := trail.ParseRef(trail.Clean(s)); ref != "" {
+			urls = append(urls, trail.URL(ref))
 		}
+	}
+	if unknown := app.Cache.Unknown(urls...); len(unknown) > 0 {
+		return fmt.Errorf("%s: no such PR", trail.Ref(unknown[0]))
 	}
 	return trails.Add(name, false, steps...)
 }

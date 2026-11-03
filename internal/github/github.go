@@ -83,10 +83,22 @@ func dirName(s string) string {
 	return s
 }
 
-// Fresh reports whether the PR was fetched within TTL.
+// closedTTL is how long a closed PR stays fresh: it may be reopened, but seldom is.
+const closedTTL = time.Hour
+
+// Fresh reports whether the PR was fetched within TTL. A merged PR can't change and
+// stays fresh; a closed one stays fresh for closedTTL.
 func (c Cache) Fresh(url string) bool {
 	fi, err := os.Stat(c.file(url))
-	return err == nil && time.Since(fi.ModTime()) < c.TTL
+	if err != nil {
+		return false
+	}
+	age := time.Since(fi.ModTime())
+	if age < c.TTL {
+		return true
+	}
+	p, ok := c.Read(url)
+	return ok && (p.State == "MERGED" || p.State == "CLOSED" && age < closedTTL)
 }
 
 // Read is the PR's cached state, if it has been fetched.
@@ -109,13 +121,15 @@ func (c Cache) Info(url string) PR {
 	return PR{Number: num, State: "UNKNOWN", CI: "none"}
 }
 
-// Exists reports whether GitHub knows the PR, caching it on the way.
-func (c Cache) Exists(url string) bool {
-	if _, ok := c.Read(url); !ok {
-		c.Fetch([]string{url})
+// Unknown are the PRs among urls GitHub doesn't know. Those not cached yet are asked
+// about in one request, and cached on the way.
+func (c Cache) Unknown(urls ...string) []string {
+	cached := func(url string) bool { _, ok := c.Read(url); return ok }
+	ask := slices.DeleteFunc(slices.Clone(urls), cached)
+	if len(ask) > 0 {
+		c.Fetch(ask)
 	}
-	_, ok := c.Read(url)
-	return ok
+	return slices.DeleteFunc(slices.Clone(ask), cached)
 }
 
 // Refresh fetches the PRs whose cache is stale, or all of them with force.
@@ -132,7 +146,7 @@ func (c Cache) Refresh(force bool, urls []string) {
 }
 
 // Fetch caches what GitHub says about each PR. A PR it doesn't know gets no cache file,
-// which is how Exists tells it doesn't exist.
+// which is how Unknown tells it doesn't exist.
 func (c Cache) Fetch(urls []string) {
 	got, err := c.Query(urls)
 	if err != nil {
