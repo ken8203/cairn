@@ -56,7 +56,9 @@ trail or session file takes a lock and replaces the file atomically (`trail.Lock
 `rex.lua`, embedded), `herdr.go`, `hc.go`, `tmux.go` and `orca.go`; `host.go`
 dispatches. The `hosts` slice is in detection order, innermost first, and a stored pane
 key finds its host by prefix. Rex's keys have no prefix, so Rex stays last as the
-fallback. A panel's host CLI calls go through `cli`, with its 10-second timeout.
+fallback. Every host CLI call, a panel's or a lookup's (pane keys, labels, titles), goes
+through `cli`, with its 10-second timeout: the hook and the statusline must not hang on
+a host that stopped answering.
 
 ## Agent guides
 

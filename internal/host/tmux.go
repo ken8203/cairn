@@ -2,7 +2,6 @@ package host
 
 import (
 	"os"
-	"os/exec"
 	"strings"
 )
 
@@ -49,7 +48,7 @@ func tmuxDisplay(pane, format string) string {
 	if pane == "" {
 		return ""
 	}
-	b, _ := exec.Command("tmux", "display", "-p", "-t", pane, format).Output()
+	b, _ := cli("", "tmux", "display", "-p", "-t", pane, format)
 	return strings.TrimRight(string(b), "\n")
 }
 

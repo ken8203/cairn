@@ -108,7 +108,7 @@ func lookup(hs []host, key string) (host, string) {
 
 // decode decodes what a CLI prints into out, leaving out as it was when the CLI fails.
 func decode(out any, name string, args ...string) {
-	if b, err := exec.Command(name, args...).Output(); err == nil {
+	if b, err := cli("", name, args...); err == nil {
 		json.Unmarshal(b, out)
 	}
 }
