@@ -1,0 +1,12 @@
+{
+  "name": "cairn",
+  "interface": { "displayName": "cairn" },
+  "plugins": [
+    {
+      "name": "cairn",
+      "source": { "source": "url", "url": "https://github.com/ken8203/cairn.git" },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "category": "Productivity"
+    }
+  ]
+}

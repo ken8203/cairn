@@ -1,0 +1,12 @@
+{
+  "name": "cairn",
+  "description": "cairn, which keeps a trail of the PRs and steps each agent session works through.",
+  "owner": { "name": "ken8203" },
+  "plugins": [
+    {
+      "name": "cairn",
+      "source": "./",
+      "description": "Keep a trail of the PRs and steps each agent session works through."
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "name": "cairn",
+  "description": "Keep a trail of the PRs and steps each agent session works through, recorded as the agent opens, pushes and touches PRs.",
+  "version": "0.1.0",
+  "author": { "name": "ken8203" },
+  "homepage": "https://github.com/ken8203/cairn",
+  "repository": "https://github.com/ken8203/cairn"
+}
