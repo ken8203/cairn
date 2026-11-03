@@ -35,7 +35,7 @@ runs only what's missing, never edits a config file itself, and ends with `cairn
 
 ## Trails
 
-Trails are Markdown files in `${XDG_STATE_HOME:-~/.local/state}/cairn/trails/`:
+Trails are Markdown files in `~/.cairn/trails/`:
 
 ```markdown
 # checkout-v2
@@ -47,12 +47,13 @@ Trails are Markdown files in `${XDG_STATE_HOME:-~/.local/state}/cairn/trails/`:
 
 ## Notes
 
-- 11-02 #120 waiting on review
+- 2026-11-02 #120 waiting on review
 ```
 
 A step that starts with `owner/repo#n` is a PR step: it counts as done once GitHub says
 merged or closed. Any other step is free text, ticked by hand. Notes are dated
-`MM-DD`. Edit the file freely; cairn only rewrites the lines it changes.
+`YYYY-MM-DD` (older ones `MM-DD`). Edit the file freely; cairn only rewrites the lines it
+changes.
 
 ## Sessions
 
@@ -84,21 +85,66 @@ A pane key names one pane process, never reused: a pane a host restores after a 
 or a new pane that gets an old one's number, starts fresh in cairn. Run
 `cairn use <name>` there to rejoin a trail.
 
-Which trail a session is on lives in `sessions/<key>.trail`, and the PRs it touched in
-`sessions/<key>.prs` (one URL per line). `panes/<pane>.session` holds the last agent
-session that ran cairn in a pane, which is what that pane's panel shows. PR state from
-GitHub is cached for 60 seconds in `${XDG_CACHE_HOME:-~/.cache}/cairn/`, shared by every
-cairn process.
-
 A session that touches a PR already on another trail does not join it. When a session
 without a trail opens or pushes its own PR, cairn starts a trail for it, named after the
 pane's host as above, else the PR's branch, else `trail-<key>`, with `-2`, `-3`, … added
 if that name is taken.
 
+## State
+
+All of cairn's state lives in `${CAIRN_HOME:-~/.cairn}`:
+
+```
+~/.cairn/
+  trails/<name>.md                     the trails
+  sessions/<key>.json                  each session's trail, PRs and places
+  panes/<pane-key>                     the last agent session that ran cairn in a pane
+  cache/prs/<owner>/<repo>/<n>.json    PR state from GitHub
+```
+
+A session's file is
+
+```json
+{"trail": "checkout-v2", "prs": ["https://github.com/acme/api/pull/120"],
+ "places": [{"dir": "/home/me/api", "repo": "acme/api", "branch": "checkout-v2"}],
+ "updated": "2026-11-03T10:00:00+08:00"}
+```
+
+with `trail` `null` until the session is on one. `places` are where the session recorded
+its PRs from: the git toplevel (a worktree's own), the `owner/repo` of its `origin`
+remote, and the branch. Session files are written under a lock and replaced atomically,
+so a hook's record and an agent's `cairn use` don't lose each other's change.
+
+A pane's file holds one session id; it is what that pane's panel shows. Pointers
+untouched for 30 days are removed whenever another is written. PR state is cached for 60
+seconds, shared by every cairn process.
+
+## Folders
+
+The unit of work is a repo, branch and worktree, not a terminal, so a folder finds its
+trail whichever host or agent session opens it. The trail of a folder is:
+
+1. a trail with a PR step in the folder's `origin` repo whose head branch is the
+   folder's branch (from the PR cache; a PR not fetched yet doesn't match), else
+2. the trail of a session that recorded a PR from the same git toplevel and branch,
+
+the most recently changed trail when several match. Outside a git repo, or on a
+detached HEAD, a folder has none. Each git call gets two seconds.
+
+Views show, in order, the session's own trail, that of the session the pane last ran,
+then the folder's: `cairn` and `cairn show` (the cwd, or `--dir <path>`), the
+statusline (its cwd), `cairn watch` (`--dir`, else its cwd) and `cairn panel`, which
+hands the caller's cwd to the watch it starts. A trail found by folder says so,
+`found by folder: api on checkout-v2 — cairn use checkout-v2 to join`, and `cairn` shows
+it even outside any session or pane. The folder never binds a session: `add`, `done`,
+`note` and `link` still need the session's own trail, and their error names the
+folder's. When a session starts without a trail in a folder that has one, the agent is
+told that trail and to `cairn use` it if it is continuing that work.
+
 ## Commands
 
 ```
-cairn [show] [--json]      this session's trail and the PRs it touched
+cairn [show] [--json] [--dir <path>]   this session's trail, else this folder's, and the PRs it touched
 cairn ls                   every trail with its progress and next step
 cairn use <name>           attach this session to a trail, creating it if needed
 cairn add <step>...        append steps: owner/repo#n, a PR URL, or free text
@@ -106,7 +152,7 @@ cairn link <n> <pr>        turn free-text step n into that PR once it's open
 cairn done <n>             tick (or untick) free-text step n
 cairn note <text>          append a note
 cairn edit [name]          open a trail in $EDITOR
-cairn watch [pane]         keep a pane's view on screen (the panel)
+cairn watch [pane] [--dir <path>]   keep a pane's view on screen (the panel)
 cairn panel [--close] [pane]   open or close a pane's panel in the terminal it runs in
 cairn statusline           Claude Code statusline segment
 cairn setup [--dry-run]    install cairn's plugin in Claude Code and Codex, then run doctor
@@ -155,14 +201,19 @@ were opened in; a trail is started if the session has none. The hook keys the se
 the id the agent hands it, and asks GitHub from a detached `cairn record`, so it returns
 at once and never fails the agent's command.
 
+Each record also stores the place it was recorded from (see [State](#state)): the dir a
+push, a `gh pr` command or `gh pr create` ran in.
+
 When a session starts on a trail, as when it resumes, the hook tells the agent the
-trail's name, progress and next step. Agents without hooks get no automatic recording.
+trail's name, progress and next step; a session without one, in a folder that has one,
+hears of that trail instead. Agents without hooks get no automatic recording.
 
 ## Panel
 
 `cairn watch <pane>` keeps the trail of the session last run in a pane on screen, and
 switches to a new session once it has run cairn there; `<pane>` is a pane key as above,
-or a Rex block. Without one it watches the pane it runs in.
+or a Rex block. Without one it watches the pane it runs in. When the pane's session has
+no trail, it shows the trail of `--dir`, else of the folder it runs in.
 
 `cairn panel [pane]` toggles that view for a pane, the current one without a key, in the
 way its host suits best; `cairn panel --close` only closes it. Agents run it when you ask
@@ -204,7 +255,7 @@ The panel fits itself to its pane as it's resized and refreshes every 60 seconds
 `cairn show --json` (or `cairn --json`) prints this session's trail as one JSON object,
 for panels and tools. Like the statusline, it answers from the cache at once, refreshes
 stale PRs in the background, and run without the agent's session id, follows the pane to
-the session last run there.
+the session last run there, then the folder.
 
 ```json
 {
@@ -221,8 +272,9 @@ the session last run there.
        "state": "open", "ci": "pending", "stacked_on": "acme/api#120"},
       {"n": 3, "kind": "text", "text": "release api 1.4", "done": false}
     ],
-    "notes": ["11-02 #120 waiting on review"]
+    "notes": ["2026-11-02 #120 waiting on review"]
   },
+  "via": "session",
   "prs": [
     {"ref": "acme/docs#7", "url": "https://github.com/acme/docs/pull/7",
      "title": "Document the checkout flow", "state": "draft", "ci": "fail"}
@@ -232,6 +284,9 @@ the session last run there.
 
 - `trail` is `null` for a session without one. `done` counts finished steps; `n` is the
   number `cairn done` and `cairn link` take.
+- `via` is how the trail was found: `session` (its own), `pane` (the session the pane
+  last ran) or `dir` (the folder, `--dir` or the cwd; see [Folders](#folders)). It is
+  left out when `trail` is `null`.
 - A step's `kind` is `pr` or `text`. A text step has `text`; a PR step has `ref`
   (`owner/repo#n`), `url`, `title`, `state` and `ci`, and `stacked_on`, the `ref` of the
   step whose head is its base, when it is stacked.
@@ -254,7 +309,8 @@ trail, the open PRs the session touched). Append it to whatever `statusLine.comm
 
 It answers from the cache at once and refreshes stale PRs in the background, one
 refresh per session at a time. Run without the agent's session id, it follows the pane to
-the session last run there, as the panel does.
+the session last run there, as the panel does; without a trail either way, it shows the
+trail of its cwd's folder.
 
 ## Development
 
@@ -267,7 +323,7 @@ make test
 cmd/main.go          the cairn subcommands, wired together
 internal/trail       trail files and their locked edits
 internal/github      PR state: one batched GraphQL request, the 60-second cache, CI
-internal/session     agent and pane ids, pane pointers, auto-created trails
+internal/session     agent and pane ids, session files, pane pointers, auto-created trails, folder lookup
 internal/hook        agent hook payloads, and what a Bash command touched to record
 internal/host        the terminal cairn runs in: pane keys, labels, pane titles, the panel
 internal/setup       setup through the agents' plugin CLIs, and doctor's checks
