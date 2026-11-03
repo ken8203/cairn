@@ -41,7 +41,7 @@ session that joins it. cairn's agent hook records the PRs each session touches.
   cairn note <text>          append a note
   cairn edit [name]          open a trail in $EDITOR
   cairn watch [pane] [--dir <path>]   keep a pane's view on screen (the panel)
-  cairn panel [--close] [pane]   open or close a pane's panel in the terminal it runs in
+  cairn panel [--close] [--lua] [pane]   open or close a pane's panel in the terminal it runs in
   cairn statusline           Claude Code statusline segment
   cairn setup [--dry-run]    install cairn's plugin in Claude Code and Codex, then run doctor
   cairn doctor [--json]      check the install without changing it; exit 1 on a failure
@@ -249,12 +249,21 @@ func run(app ui.App, args []string) error {
 		}
 		var target string
 		for _, a := range args[1:] {
-			if a != "--close" {
+			if !strings.HasPrefix(a, "--") {
 				target = host.Key(a)
 			}
 		}
 		wd, _ := os.Getwd()
-		err = host.Panel(self, target, wd, slices.Contains(args[1:], "--close"))
+		closeOnly := slices.Contains(args[1:], "--close")
+		if slices.Contains(args[1:], "--lua") {
+			lua, err := host.RexPanelLua(self, target, wd, closeOnly)
+			if err != nil {
+				return err
+			}
+			fmt.Print(lua)
+			return nil
+		}
+		err = host.Panel(self, target, wd, closeOnly)
 		if errors.Is(err, host.ErrNoPanel) {
 			fmt.Println("cairn panel:", err)
 			return nil

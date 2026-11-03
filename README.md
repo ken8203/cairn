@@ -153,7 +153,7 @@ cairn done <n>             tick (or untick) free-text step n
 cairn note <text>          append a note
 cairn edit [name]          open a trail in $EDITOR
 cairn watch [pane] [--dir <path>]   keep a pane's view on screen (the panel)
-cairn panel [--close] [pane]   open or close a pane's panel in the terminal it runs in
+cairn panel [--close] [--lua] [pane]   open or close a pane's panel in the terminal it runs in
 cairn statusline           Claude Code statusline segment
 cairn setup [--dry-run]    install cairn's plugin in Claude Code and Codex, then run doctor
 cairn doctor [--json]      check the install without changing it; exit 1 on a failure
@@ -228,11 +228,15 @@ to see the trail, and a host's own keybinding can pass the focused pane's key.
 | Herdr.app | a terminal named `cairn-<address>` in the same space and tab, from `hc run` | a Herdr.app command that runs `cairn panel` |
 | Orca | a terminal split off the pane, titled `cairn` | an Orca command that runs `cairn panel` |
 
-In Rex's `init.lua`:
+In Rex's `init.lua`, the action runs the Lua `cairn panel --lua` prints. Rex starts an
+action's programs without the terminal's environment, where `rex` itself can't be found,
+so the action toggles the layer in its own Lua rather than through `cairn panel`:
 
 ```lua
 rex.action{ name = "cairn", title = "Toggle Cairn", run = function(ctx)
-  rex.exec{ os.getenv("HOME") .. "/.local/bin/cairn", "panel", ctx.block_id }
+  local res = rex.exec{ os.getenv("HOME") .. "/.local/bin/cairn", "panel", "--lua", ctx.block_id }
+  if not res.ok then error(res.stderr, 0) end
+  loadstring(res.stdout)()
 end }
 rex.bind("ctrl+cmd+p", "cairn")
 ```

@@ -182,11 +182,22 @@ func lookup(hs []host, key string) (host, string) {
 	return hs[len(hs)-1], key
 }
 
+// rexBin is the rex CLI: on PATH, else in $REX_BIN_DIR, which Rex sets in its terminals.
+func rexBin() string {
+	if p, err := exec.LookPath("rex"); err == nil {
+		return p
+	}
+	if dir := os.Getenv("REX_BIN_DIR"); dir != "" {
+		return filepath.Join(dir, "rex")
+	}
+	return "rex"
+}
+
 func rexTitle(block string) string {
 	var res struct {
 		Title string `json:"title"`
 	}
-	decode(&res, "rex", "block", "call", "-s", os.Getenv("REX_SESSION"), "-b", "block:"+block, "title", "{}")
+	decode(&res, rexBin(), "block", "call", "-s", os.Getenv("REX_SESSION"), "-b", "block:"+block, "title", "{}")
 	return res.Title
 }
 
@@ -197,7 +208,7 @@ func rexLabel(session string) string {
 	var res struct {
 		Label string `json:"label"`
 	}
-	decode(&res, "rex", "session", "inspect", session, "--json")
+	decode(&res, rexBin(), "session", "inspect", session, "--json")
 	return res.Label
 }
 
