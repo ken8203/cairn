@@ -41,7 +41,8 @@ session that joins it. cairn's agent hook records the PRs each session touches.
   cairn note <text>          append a note
   cairn edit [name]          open a trail in $EDITOR
   cairn watch [pane] [--dir <path>]   keep a pane's view on screen (the panel)
-  cairn panel [--close] [--lua] [pane]   open or close a pane's panel in the terminal it runs in
+  cairn panel [--close] [pane]   open or close a pane's panel in the terminal it runs in
+  cairn panel --lua [block]  print Rex's toggle as Lua, for an init.lua action
   cairn statusline           Claude Code statusline segment
   cairn setup [--dry-run]    install cairn's plugin in Claude Code and Codex, then run doctor
   cairn doctor [--json]      check the install without changing it; exit 1 on a failure
