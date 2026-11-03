@@ -56,7 +56,7 @@ func tmuxDisplay(pane, format string) string {
 // tmuxPanel shows the panel in a popup over the pane. The popup is modal and q closes it,
 // so there is nothing to toggle. display-popup waits for the popup to close, so a
 // background run-shell starts it.
-func tmuxPanel(body string, watch []string, close bool) error {
+func tmuxPanel(body string, w watch, close bool) error {
 	pane := tmuxPane(body)
 	if pane == "" {
 		return errNoPane("tmux", body)
@@ -64,7 +64,7 @@ func tmuxPanel(body string, watch []string, close bool) error {
 	if close {
 		return nil
 	}
-	popup := shellJoin("tmux", "display-popup", "-E", "-w", "80%", "-h", "50%", "-t", pane, shellJoin(watch...))
+	popup := shellJoin("tmux", "display-popup", "-E", "-w", "80%", "-h", "50%", "-t", pane, shellJoin(w.argv()...))
 	_, err := cli("", "tmux", "run-shell", "-b", "-t", pane, popup)
 	return err
 }

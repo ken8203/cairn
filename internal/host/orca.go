@@ -48,7 +48,7 @@ type orcaTerminal struct {
 }
 
 // orcaPanel splits the panel off the terminal, or closes the panel in the terminal's tab.
-func orcaPanel(handle string, watch []string, close bool) error {
+func orcaPanel(handle string, w watch, close bool) error {
 	out, err := cli("", "orca", "terminal", "list", "--json")
 	if err != nil {
 		return err
@@ -74,7 +74,7 @@ func orcaPanel(handle string, watch []string, close bool) error {
 	if close {
 		return nil
 	}
-	out, err = cli("", "orca", "terminal", "split", "--terminal", handle, "--direction", "horizontal", "--command", shellJoin(watch...), "--json")
+	out, err = cli("", "orca", "terminal", "split", "--terminal", handle, "--direction", "horizontal", "--command", shellJoin(w.argv()...), "--json")
 	if err != nil {
 		return err
 	}

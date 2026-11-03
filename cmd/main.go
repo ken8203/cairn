@@ -41,6 +41,7 @@ session that joins it. cairn's agent hook records the PRs each session touches.
   cairn note <text>          append a note
   cairn edit [name]          open a trail in $EDITOR
   cairn watch [pane] [--dir <path>]   keep a pane's view on screen (the panel)
+  cairn watch --from-env     the same, for $CAIRN_PANE and $CAIRN_DIR (herdr's overlay)
   cairn panel [--close] [pane]   open or close a pane's panel in the terminal it runs in
   cairn panel --lua [block]  print Rex's toggle as Lua, for an init.lua action
   cairn statusline           Claude Code statusline segment
@@ -230,6 +231,15 @@ func run(app ui.App, args []string) error {
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 		return cmd.Run()
 	case "watch":
+		if slices.Contains(args[1:], "--from-env") {
+			// herdr's overlay is a pane of its own, so the panel's pane and folder come in
+			// its env.
+			target := host.Key(os.Getenv("CAIRN_PANE"))
+			if target == "" {
+				return errors.New("cairn watch --from-env: no CAIRN_PANE")
+			}
+			return app.Watch(target, cmp.Or(os.Getenv("CAIRN_DIR"), dir()))
+		}
 		var target string
 		for i := 1; i < len(args); i++ {
 			if args[i] == "--dir" {

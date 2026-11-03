@@ -222,7 +222,9 @@ func TestCLIErrors(t *testing.T) {
 		{"s1", []string{"use", "a b"}, "trail names use letters, digits, '.', '_' and '-'"},
 		{"", []string{"edit"}, "usage: cairn edit <name>"},
 		{"", []string{"nope"}, "unknown command 'nope'; see `cairn --help`"},
+		{"", []string{"watch", "--from-env"}, "cairn watch --from-env: no CAIRN_PANE"},
 	}
+	t.Setenv("CAIRN_PANE", "")
 	for _, tt := range tests {
 		t.Setenv("CLAUDE_CODE_SESSION_ID", tt.session)
 		if err := run(app, tt.args); err == nil || err.Error() != tt.want {
