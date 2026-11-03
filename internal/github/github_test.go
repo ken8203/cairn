@@ -118,6 +118,28 @@ func TestRefreshFetchesOnlyStale(t *testing.T) {
 	}
 }
 
+func TestFinishedPRsStayFresh(t *testing.T) {
+	c := Cache{Dir: t.TempDir(), TTL: time.Minute}
+	age := func(url string, d time.Duration) {
+		old := time.Now().Add(-d)
+		os.Chtimes(c.file(url), old, old)
+	}
+	open, merged, closed := "https://github.com/o/r/pull/1", "https://github.com/o/r/pull/2", "https://github.com/o/r/pull/3"
+	writeCache(t, c, open, PR{Number: 1, State: "OPEN"})
+	writeCache(t, c, merged, PR{Number: 2, State: "MERGED"})
+	writeCache(t, c, closed, PR{Number: 3, State: "CLOSED"})
+	age(open, 2*c.TTL)
+	age(merged, 1000*time.Hour)
+	age(closed, 2*c.TTL)
+	if c.Fresh(open) || !c.Fresh(merged) || !c.Fresh(closed) {
+		t.Errorf("fresh: open %v, merged %v, closed %v", c.Fresh(open), c.Fresh(merged), c.Fresh(closed))
+	}
+	age(closed, 2*closedTTL)
+	if c.Fresh(closed) {
+		t.Error("closed PR fresh past closedTTL")
+	}
+}
+
 func TestInfoUnknown(t *testing.T) {
 	c := Cache{Dir: t.TempDir()}
 	if got, want := c.Info("https://github.com/o/r/pull/42"), (PR{Number: 42, State: "UNKNOWN", CI: "none"}); got != want {

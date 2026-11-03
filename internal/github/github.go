@@ -83,10 +83,22 @@ func dirName(s string) string {
 	return s
 }
 
-// Fresh reports whether the PR was fetched within TTL.
+// closedTTL is how long a closed PR stays fresh: it may be reopened, but seldom is.
+const closedTTL = time.Hour
+
+// Fresh reports whether the PR was fetched within TTL. A merged PR can't change and
+// stays fresh; a closed one stays fresh for closedTTL.
 func (c Cache) Fresh(url string) bool {
 	fi, err := os.Stat(c.file(url))
-	return err == nil && time.Since(fi.ModTime()) < c.TTL
+	if err != nil {
+		return false
+	}
+	age := time.Since(fi.ModTime())
+	if age < c.TTL {
+		return true
+	}
+	p, ok := c.Read(url)
+	return ok && (p.State == "MERGED" || p.State == "CLOSED" && age < closedTTL)
 }
 
 // Read is the PR's cached state, if it has been fetched.

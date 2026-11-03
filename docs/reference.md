@@ -125,7 +125,9 @@ so a hook's record and an agent's `cairn use` don't lose each other's change.
 
 A pane's file holds one session id; it is what that pane's panel shows. Pointers
 untouched for 30 days are removed whenever another is written, and so are hook markers.
-PR state is cached for 60 seconds, shared by every cairn process.
+PR state is cached for 60 seconds, shared by every cairn process. A merged PR is not
+asked about again, and a closed one, which may be reopened, after an hour; `r` in the
+panel asks about them all.
 
 ## Folders
 
