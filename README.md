@@ -153,7 +153,8 @@ cairn done <n>             tick (or untick) free-text step n
 cairn note <text>          append a note
 cairn edit [name]          open a trail in $EDITOR
 cairn watch [pane] [--dir <path>]   keep a pane's view on screen (the panel)
-cairn panel [--close] [--lua] [pane]   open or close a pane's panel in the terminal it runs in
+cairn panel [--close] [pane]   open or close a pane's panel in the terminal it runs in
+cairn panel --lua [block]  print Rex's toggle as Lua, for an init.lua action
 cairn statusline           Claude Code statusline segment
 cairn setup [--dry-run]    install cairn's plugin in Claude Code and Codex, then run doctor
 cairn doctor [--json]      check the install without changing it; exit 1 on a failure
@@ -353,7 +354,9 @@ internal/trail       trail files and their locked edits
 internal/github      PR state: one batched GraphQL request, the 60-second cache, CI
 internal/session     agent and pane ids, session files, pane pointers, auto-created trails, folder lookup
 internal/hook        agent hook payloads, and what a Bash command touched to record
-internal/host        the terminal cairn runs in: pane keys, labels, pane titles, the panel
+internal/host        the terminal cairn runs in: pane keys, labels, pane titles, the panel;
+                     host.go dispatches, and rex.go (+ rex.lua), herdr.go, hc.go, tmux.go and
+                     orca.go hold one terminal each
 internal/orca        Orca worktree cards kept in sync with their trails
 internal/setup       setup through the agents' plugin CLIs, and doctor's checks
 internal/skills      the guides `cairn skills` prints, embedded

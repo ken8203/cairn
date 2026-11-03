@@ -1,0 +1,96 @@
+package host
+
+import (
+	_ "embed"
+	json "encoding/json/v2"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+)
+
+var rex = host{
+	name: "Rex",
+	env:  "REX_BLOCK",
+	// Rex keys are bare block ids, as cairn has always stored them.
+	key:   Key,
+	label: func() string { return rexLabel(os.Getenv("REX_SESSION")) },
+	title: rexTitle,
+	panel: rexPanel,
+}
+
+// rexBin is the rex CLI: on PATH, else in $REX_BIN_DIR, which Rex sets in its terminals.
+func rexBin() string {
+	if p, err := exec.LookPath("rex"); err == nil {
+		return p
+	}
+	if dir := os.Getenv("REX_BIN_DIR"); dir != "" {
+		return filepath.Join(dir, "rex")
+	}
+	return "rex"
+}
+
+func rexTitle(block string) string {
+	var res struct {
+		Title string `json:"title"`
+	}
+	decode(&res, rexBin(), "block", "call", "-s", os.Getenv("REX_SESSION"), "-b", "block:"+block, "title", "{}")
+	return res.Title
+}
+
+func rexLabel(session string) string {
+	if session == "" {
+		return ""
+	}
+	var res struct {
+		Label string `json:"label"`
+	}
+	decode(&res, rexBin(), "session", "inspect", session, "--json")
+	return res.Label
+}
+
+// RexPanelLua is a Lua chunk that toggles the panel of the Rex block a key names, for an
+// init.lua action to run itself with loadstring. Run that way it needs no rex CLI, which
+// the bare environment Rex gives an action's programs can't find.
+func RexPanelLua(cairn, key, dir string, close bool) (string, error) {
+	if key == "" {
+		key = Pane()
+	}
+	if h, _ := lookup(hosts, key); h.name != rex.name || key == "" {
+		return "", fmt.Errorf("--lua needs a Rex block, not %q", key)
+	}
+	return rexScript(key, watchCmd(cairn, key, dir), close)
+}
+
+//go:embed rex.lua
+var rexPanelLua string
+
+// rexPanel floats the panel over the window holding the block, or closes the floating
+// layer that holds it. -b scopes the script to the block's session.
+func rexPanel(id string, watch []string, close bool) error {
+	script, err := rexScript(id, watch, close)
+	if err != nil {
+		return err
+	}
+	_, err = cli(script, rexBin(), "do", "-", "-b", "block:"+id)
+	return err
+}
+
+// rexScript is panel.lua followed by its call for this block. The arguments travel as JSON
+// in a long bracket, which a value holding the bracket's close would end early.
+func rexScript(id string, watch []string, close bool) (string, error) {
+	args, err := json.Marshal(struct {
+		Block   string   `json:"block"`
+		Command []string `json:"command"`
+		Close   bool     `json:"close"`
+		Label   string   `json:"label"`
+	}{"block:" + id, watch, close, panelTitle})
+	if err != nil {
+		return "", err
+	}
+	if strings.Contains(string(args), "]==]") {
+		return "", fmt.Errorf("rex: can't pass %s to Lua", args)
+	}
+	return rexPanelLua + "return toggle(rex.json.decode([==[" + string(args) + "]==]))\n", nil
+}

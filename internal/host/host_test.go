@@ -2,6 +2,7 @@ package host
 
 import (
 	"cmp"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -27,11 +28,6 @@ func stubTerminal(t *testing.T, id string) {
 	herdrTerminal = func(string, string) string { return id }
 	t.Cleanup(func() { herdrTerminal = old })
 }
-
-const (
-	tmuxEnv = "/tmp/tmux-501/default,4242,0"
-	hcScope = "17396136072524-68dbd673"
-)
 
 func TestPane(t *testing.T) {
 	stubTerminal(t, "term_9")
@@ -93,105 +89,6 @@ func TestName(t *testing.T) {
 	}
 }
 
-// A herdr key carries its session, or default without one, back to the lookups.
-func TestHerdrKeyRoundTrip(t *testing.T) {
-	stubTerminal(t, "term_65f5")
-	tests := []struct{ session, pane, key, wantSession string }{
-		{"", "w1:p2", "herdr-default.w1-p2.term_65f5", "default"},
-		{"work", "w12:p3", "herdr-work.w12-p3.term_65f5", "work"},
-		{"v1.2", "w1:p1", "herdr-v1.2.w1-p1.term_65f5", "v1.2"},
-	}
-	for _, tt := range tests {
-		clearEnv(t)
-		t.Setenv("HERDR_SESSION", tt.session)
-		t.Setenv("HERDR_PANE_ID", tt.pane)
-		key := Pane()
-		if key != tt.key {
-			t.Errorf("%+v: Pane = %q", tt, key)
-		}
-		if session, pane := herdrPane(strings.TrimPrefix(key, "herdr-")); session != tt.wantSession || pane != tt.pane {
-			t.Errorf("%+v: herdrPane = %q, %q", tt, session, pane)
-		}
-	}
-	for _, key := range []string{"w1-p1", "default.w1-p1"} {
-		if session, pane := herdrPane(key); session != "" || pane != "" {
-			t.Errorf("herdrPane(%q) = %q, %q", key, session, pane)
-		}
-	}
-}
-
-// Without a terminal id the pane could be one herdr brought back, so there is none.
-func TestHerdrNoTerminal(t *testing.T) {
-	stubTerminal(t, "")
-	clearEnv(t)
-	t.Setenv("HERDR_PANE_ID", "w1:p1")
-	if got := Pane(); got != "" || Name() == "" {
-		t.Errorf("Pane = %q, Name = %q", got, Name())
-	}
-}
-
-func TestTmuxServer(t *testing.T) {
-	for env, want := range map[string]string{
-		tmuxEnv:                   "4242",
-		"/tmp/a,b/default,77,1":   "77",
-		"":                        "",
-		"garbage":                 "",
-		"/tmp/tmux-501/default,1": "",
-		"/tmp/s,pid,0":            "",
-		"/tmp/s,,0":               "",
-	} {
-		if got := tmuxServer(env); got != want {
-			t.Errorf("tmuxServer(%q) = %q, want %q", env, got, want)
-		}
-	}
-	clearEnv(t)
-	t.Setenv("TMUX_PANE", "%3")
-	t.Setenv("TMUX", "garbage")
-	if got := Pane(); got != "" {
-		t.Errorf("Pane with a garbage $TMUX = %q", got)
-	}
-}
-
-// Without a scope an hc address could be one handed out again, so there is no pane.
-func TestHcNoScope(t *testing.T) {
-	clearEnv(t)
-	t.Setenv("HC_TERMINAL_ID", "t3")
-	if got := Pane(); got != "" || Name() == "" {
-		t.Errorf("Pane = %q, Name = %q", got, Name())
-	}
-	t.Setenv("HC_SCOPE", "17396/x y")
-	if got := Pane(); got != "hc-t3.17396-x-y" {
-		t.Errorf("Pane = %q", got)
-	}
-}
-
-func TestHcSpace(t *testing.T) {
-	for where, want := range map[string]string{
-		"dotfiles / 1":        "dotfiles",
-		"  my space  / build": "my space",
-		"solo":                "solo",
-		"":                    "",
-	} {
-		if got := hcSpace(where); got != want {
-			t.Errorf("hcSpace(%q) = %q, want %q", where, got, want)
-		}
-	}
-}
-
-func TestOrcaLabel(t *testing.T) {
-	clearEnv(t)
-	t.Setenv("ORCA_TERMINAL_HANDLE", "term_1")
-	t.Setenv("ORCA_WORKTREE_ID", "0b1c::/Users/me/code/cairn.feat-x")
-	if got := Label(); got != "cairn.feat-x" {
-		t.Errorf("Label = %q", got)
-	}
-	for _, id := range []string{"", "0b1c", "0b1c::"} {
-		if got := orcaLabel(id); got != "" {
-			t.Errorf("orcaLabel(%q) = %q", id, got)
-		}
-	}
-}
-
 // Each stored key goes to its own host's lookup with the key body.
 func TestTitleDispatch(t *testing.T) {
 	var asked []string
@@ -233,23 +130,71 @@ func TestBodies(t *testing.T) {
 	}
 }
 
-func TestRexBin(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("PATH", t.TempDir())
-	t.Setenv("REX_BIN_DIR", dir)
-	if got, want := rexBin(), filepath.Join(dir, "rex"); got != want {
-		t.Errorf("rexBin() off PATH = %q, want %q", got, want)
+// fakeCLIs puts the scripts, named after host CLIs, first on PATH. Each logs its
+// arguments to the log it returns, then runs its body in the dir holding that log.
+func fakeCLIs(t *testing.T, scripts map[string]string) (dir string, log func() []string) {
+	t.Helper()
+	dir = t.TempDir()
+	for name, body := range scripts {
+		script := "#!/bin/sh\ncd " + dir + "\necho \"" + name + " $*\" >> log\n" + body + "\n"
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
-	t.Setenv("REX_BIN_DIR", "")
-	if got := rexBin(); got != "rex" {
-		t.Errorf("rexBin() without REX_BIN_DIR = %q, want rex", got)
+	t.Setenv("PATH", dir+":/usr/bin:/bin")
+	return dir, func() []string {
+		b, _ := os.ReadFile(filepath.Join(dir, "log"))
+		return strings.Split(strings.TrimRight(string(b), "\n"), "\n")
 	}
-	onPath := t.TempDir()
-	if err := os.WriteFile(filepath.Join(onPath, "rex"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatal(err)
+}
+
+func wantLog(t *testing.T, got []string, want ...string) {
+	t.Helper()
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("ran\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
-	t.Setenv("PATH", onPath)
-	if got, want := rexBin(), filepath.Join(onPath, "rex"); got != want {
-		t.Errorf("rexBin() on PATH = %q, want %q", got, want)
+}
+
+const cairn = "/opt/my bin/cairn"
+
+func TestPanelNoPane(t *testing.T) {
+	clearEnv(t)
+	if err := Panel(cairn, "", "", false); !errors.Is(err, ErrNoPanel) {
+		t.Errorf("Panel outside every host = %v", err)
+	}
+}
+
+// A CLI's failure is one line naming it.
+func TestPanelError(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("ORCA_TERMINAL_HANDLE", "term_1")
+	fakeCLIs(t, map[string]string{"orca": "echo 'not running\nstart orca' >&2; exit 1"})
+	err := Panel(cairn, "", "", false)
+	if err == nil || err.Error() != "orca terminal: not running" {
+		t.Errorf("Panel = %v", err)
+	}
+}
+
+// A key names the pane outside its host's env, as a host's own keybinding passes it.
+func TestPanelForKey(t *testing.T) {
+	clearEnv(t)
+	tests := []struct{ key, want string }{
+		{"b1", "rex do - -b block:b1"},
+		{"tmux-4242.3", `tmux run-shell -b -t %3 'tmux' 'display-popup' '-E' '-w' '80%' '-h' '50%' '-t' '%3' ''\''/opt/my bin/cairn'\'' '\''watch'\'' '\''tmux-4242.3'\'''`},
+		{"herdr-v1.2.w1-p1.term_9", "herdr --session v1.2 pane list"},
+		{"hc-t3." + hcScope, "hc get cairn-t3 --json"},
+		{"orca-term_1", "orca terminal list --json"},
+	}
+	for _, tt := range tests {
+		_, log := fakeCLIs(t, map[string]string{"rex": "", "tmux": "", "herdr": "", "hc": "", "orca": ""})
+		Panel(cairn, tt.key, "", false)
+		if got := log()[0]; got != tt.want {
+			t.Errorf("Panel(%q) ran %q", tt.key, got)
+		}
+	}
+	for _, key := range []string{"tmux-4242", "herdr-w1-p1"} {
+		if err := Panel(cairn, key, "", false); err == nil || !strings.Contains(err.Error(), "no pane in") {
+			t.Errorf("Panel(%q) = %v", key, err)
+		}
 	}
 }
