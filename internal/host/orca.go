@@ -15,9 +15,11 @@ var orca = host{
 	prefix: "orca",
 	env:    "ORCA_TERMINAL_HANDLE",
 	key:    Sanitize,
-	label:  func() string { return orcaLabel(os.Getenv("ORCA_WORKTREE_ID")) },
-	title:  orcaTitle,
-	panel:  orcaPanel,
+	// A worktree holds one piece of work, as a tab does elsewhere.
+	tab:   func() string { return orcaLabel(os.Getenv("ORCA_WORKTREE_ID")) },
+	label: func() string { return orcaLabel(os.Getenv("ORCA_WORKTREE_ID")) },
+	title: orcaTitle,
+	panel: orcaPanel,
 }
 
 func orcaTitle(handle string) string {

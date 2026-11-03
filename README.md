@@ -62,8 +62,8 @@ hand. Edit the file however you like; cairn only rewrites the lines it changes.
 ## Use
 
 Most of the time cairn stays out of your way. When an agent opens or pushes a PR, cairn's
-hook records it, and a session without a trail gets one, named after the terminal pane's
-workspace or the PR's branch. A later session in the same repo and branch is told about
+hook records it, and a session without a trail gets one, named after the terminal tab you
+named, else the PR's branch. A later session in the same repo and branch is told about
 that trail, and joins it with `cairn use <name>`. When you do want a hand on the wheel:
 
 ```

@@ -17,6 +17,7 @@ var herdr = host{
 	name:   "herdr",
 	prefix: "herdr",
 	env:    "HERDR_PANE_ID",
+	tab:    func() string { return "" },
 	key: func(id string) string {
 		session := herdrSession()
 		terminal := herdrTerminal(session, id)

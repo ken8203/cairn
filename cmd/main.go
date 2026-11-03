@@ -89,7 +89,7 @@ func orcaDetail(app ui.App) string {
 func newApp(home string) ui.App {
 	trails := trail.Store{Dir: filepath.Join(home, "trails")}
 	return ui.App{
-		Sessions: session.Store{Dir: home, Trails: trails, Label: host.Label},
+		Sessions: session.Store{Dir: home, Trails: trails, Tab: host.Tab, Label: host.Label},
 		Cache:    github.Cache{Dir: filepath.Join(home, "cache"), TTL: ttl, Query: github.Query},
 		Title:    host.Title,
 		Spawn:    spawn,

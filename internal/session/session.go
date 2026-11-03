@@ -41,8 +41,9 @@ func valid(s string) string {
 type Store struct {
 	Dir    string
 	Trails trail.Store
-	// Label is the host's label for the current pane, which names a trail a session starts.
-	Label func() string
+	// Tab is the name the user gave the current pane's tab, and Label the host's label for
+	// the wider place it is in; they name a trail a session starts.
+	Tab, Label func() string
 }
 
 // state is a session's file: the trail it is on, the PRs it touched and the places it
@@ -380,11 +381,11 @@ func (s Store) Record(key, url string, own bool, head string, at Place) error {
 // A trail named after its session takes this much of the key.
 const sessionPrefixLen = 8
 
-// claim creates a trail for this session named after its host's label, the PR's branch,
-// or the session key, numbered past any trail that exists so another session's trail is
-// never joined by accident.
+// claim creates a trail for this session named after its tab, the PR's branch, its host's
+// label or the session key, numbered past any trail that exists so another session's
+// trail is never joined by accident.
 func (s Store) claim(key, head string) (string, error) {
-	base := cmp.Or(host.Sanitize(s.Label()), host.Sanitize(head), "trail-"+key[:min(len(key), sessionPrefixLen)])
+	base := cmp.Or(host.Sanitize(s.Tab()), host.Sanitize(head), host.Sanitize(s.Label()), "trail-"+key[:min(len(key), sessionPrefixLen)])
 	for i := 1; ; i++ {
 		name := base
 		if i > 1 {

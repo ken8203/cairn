@@ -16,6 +16,7 @@ var hc = host{
 	name:   "Herdr.app",
 	prefix: "hc",
 	env:    "HC_TERMINAL_ID",
+	tab:    func() string { return "" },
 	key: func(addr string) string {
 		scope := Sanitize(os.Getenv("HC_SCOPE"))
 		if scope == "" {

@@ -26,7 +26,9 @@ type host struct {
 	env string
 	// key is the body of a pane id's key, empty when it can't name the pane process alone.
 	key func(id string) string
-	// label names the work in the current pane.
+	// tab is the name the user gave the current pane's tab, or empty when they gave none.
+	tab func() string
+	// label names the wider place the current pane is in, such as its session.
 	label func() string
 	// title is the title of the pane a key body names.
 	title func(body string) string
@@ -75,13 +77,33 @@ func Name() string {
 	return h.name
 }
 
-// Label names the work in the current pane, such as its Rex session's label, or is empty.
+// Tab is the name the user gave the current pane's tab, such as a renamed Rex window, or
+// empty when they gave none. One tab holds one piece of work, so it names a trail best.
+func Tab() string {
+	h, id := current()
+	if id == "" {
+		return ""
+	}
+	return h.tab()
+}
+
+// Label names the wider place the current pane is in, such as its Rex session, or is
+// empty. A session holds many tabs, so it names a trail after Tab and the PR's branch.
 func Label() string {
 	h, id := current()
 	if id == "" {
 		return ""
 	}
 	return h.label()
+}
+
+// named is a tab's name, or empty for one still called by its number, as herdr and
+// Herdr.app call a tab nobody named.
+func named(name string) string {
+	if strings.Trim(name, "0123456789") == "" {
+		return ""
+	}
+	return name
 }
 
 // Key is the pane key a user names: a key as stored, or a Rex block with its block: prefix.

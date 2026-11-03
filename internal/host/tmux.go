@@ -11,6 +11,7 @@ var tmux = host{
 	name:   "tmux",
 	prefix: "tmux",
 	env:    "TMUX_PANE",
+	tab:    func() string { return "" },
 	key: func(id string) string {
 		pid := tmuxServer(os.Getenv("TMUX"))
 		if pid == "" {
