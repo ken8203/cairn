@@ -7,7 +7,7 @@
 //
 //	## Notes
 //
-//	- 11-02 free text
+//	- 2026-11-02 free text
 package trail
 
 import (
@@ -29,7 +29,7 @@ var (
 	refPattern  = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+`)
 	urlPattern  = regexp.MustCompile(`https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[0-9]+`)
 	stepLine    = regexp.MustCompile(`^- \[([ xX])\] (.*)$`)
-	datedNote   = regexp.MustCompile(`^[0-9]{2}-[0-9]{2}( |$)`)
+	datedNote   = regexp.MustCompile(`^([0-9]{4}-)?[0-9]{2}-[0-9]{2}( |$)`)
 )
 
 // ValidName reports whether s is safe as a trail or file name.
@@ -329,11 +329,12 @@ func (s Store) Link(name string, target int, ref string) error {
 	})
 }
 
-// Note appends a dated note; a date the text already starts with is kept.
+// Note appends a note dated YYYY-MM-DD; a date the text already starts with, including
+// the MM-DD of older notes, is kept.
 func (s Store) Note(name, text string) error {
 	text = Clean(text)
 	if !datedNote.MatchString(text) {
-		text = time.Now().Format("01-02") + " " + text
+		text = time.Now().Format(time.DateOnly) + " " + text
 	}
 	unlock, err := s.lock(name)
 	if err != nil {
