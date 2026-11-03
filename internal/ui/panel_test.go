@@ -156,6 +156,33 @@ func TestPanelRefreshSchedule(t *testing.T) {
 	}
 }
 
+func TestPanelShowsCacheFirst(t *testing.T) {
+	url := "https://github.com/o/r/pull/1"
+	a := newApp(t, map[string]github.PR{url: {Number: 1, State: "OPEN", Title: "cached title"}})
+	a.Cache.Fetch([]string{url})
+	var asked int
+	a.Cache.Query = func([]string) (map[string]github.PR, error) {
+		asked++
+		return map[string]github.PR{url: {Number: 1, State: "OPEN", Title: "fetched title"}}, nil
+	}
+	writeTrail(t, a, "t", "# t\n\n- [ ] o/r#1\n")
+	a.Sessions.Bind("s1", "t")
+	pointTo(t, a, "p1", "s1")
+	m := &panel{app: a, target: "p1", v: &view{}}
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+
+	cached := m.cached()()
+	m.Update(cached)
+	if asked != 0 || !strings.Contains(m.View().Content, "cached title") {
+		t.Fatalf("asked GitHub %d times; view:\n%s", asked, m.View().Content)
+	}
+	m.Update(m.refresh(true)())
+	m.Update(cached) // a cache read that lost the race
+	if !strings.Contains(m.View().Content, "fetched title") {
+		t.Errorf("the cache replaced the refresh:\n%s", m.View().Content)
+	}
+}
+
 func TestPanelAltScroll(t *testing.T) {
 	m := newPanel(t, 1, 20)
 	m.app.Cache.Query = func([]string) (map[string]github.PR, error) { return nil, nil }

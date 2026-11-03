@@ -216,7 +216,8 @@ as the action, it takes the focused pane's folder from `$HERDR_PLUGIN_CONTEXT_JS
 In a terminal without a pane API, `cairn panel` says so and exits 0. Each host CLI call
 times out after 10 seconds, and a failure is one line on stderr with exit 1.
 
-The panel fits itself to its pane as it's resized and refreshes every 60 seconds.
+The panel opens on the cached PR states and asks GitHub for the stale ones behind them,
+fits itself to its pane as it's resized, and refreshes every 60 seconds.
 
 ## Orca workspaces
 
