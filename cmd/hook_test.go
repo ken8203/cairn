@@ -147,8 +147,11 @@ func TestHookSessionStart(t *testing.T) {
 	if out := runHookBin(t, dir, env, start); out != "" {
 		t.Errorf("without a trail: %q", out)
 	}
-
 	state := filepath.Join(dir, "home")
+	if _, err := os.Stat(filepath.Join(state, "hooked", "s1")); err != nil {
+		t.Errorf("no hook marker: %v", err)
+	}
+
 	for file, content := range map[string]string{
 		"trails/t.md":      "# t\n\n- [x] release\n- [ ] flag on\n\n## Notes\n",
 		"sessions/s1.json": `{"trail":"t","prs":[],"updated":"2026-11-03T10:00:00Z"}` + "\n",

@@ -58,7 +58,8 @@ user can trust them, so pass the fix on to them.
 
 - **PRs aren't recorded.** Run `cairn doctor`. The plugin must be installed and enabled
   in the agent, and in Codex its hooks trusted. Hooks load when a session starts, so
-  restart the agent after installing.
+  restart the agent after installing: a `warn session` line saying cairn's hook hasn't
+  run means this session started without them.
 - **`path` fails.** Add the directory doctor names to `PATH` in the shell profile, or
   rerun `make install`.
 - **`gh` fails.** Install the GitHub CLI and run `gh auth login`.

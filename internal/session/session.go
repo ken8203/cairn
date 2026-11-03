@@ -37,7 +37,7 @@ func valid(s string) string {
 }
 
 // Store is cairn's state dir: sessions/<key>.json for each session, panes/<pane> for
-// each pane, and the trails.
+// each pane, hooked/<key> for each agent session that ran cairn's hook, and the trails.
 type Store struct {
 	Dir    string
 	Trails trail.Store
@@ -109,6 +109,7 @@ func remoteRepo(url string) string {
 
 func (s Store) sessionsDir() string { return filepath.Join(s.Dir, "sessions") }
 func (s Store) panesDir() string    { return filepath.Join(s.Dir, "panes") }
+func (s Store) hookedDir() string   { return filepath.Join(s.Dir, "hooked") }
 
 func (s Store) sessionFile(key string) string { return filepath.Join(s.sessionsDir(), key+".json") }
 
@@ -173,26 +174,23 @@ func (s Store) Bind(key, name string) error {
 // PaneSession is the session a pane last ran, or the pane itself when none has.
 func (s Store) PaneSession(pane string) string { return cmp.Or(readName(s.pointerFile(pane)), pane) }
 
-// paneTTL is how long a pane pointer lasts untouched: by then its pane is long gone, as
-// hosts never reuse a pane key.
+// stateTTL is how long a pane pointer or hook marker lasts untouched: by then its pane or
+// session is long gone. One still in use is touched at most every touchAge.
 const (
-	paneTTL      = 30 * 24 * time.Hour
-	paneTouchAge = 24 * time.Hour
+	stateTTL = 30 * 24 * time.Hour
+	touchAge = 24 * time.Hour
 )
 
 // NotePane points the pane at the agent's session. Only an agent does: the statusline may
 // run without the agent's session id, and would point the pane back at itself. A
-// pointer already right is only touched, at most every paneTouchAge, so it doesn't expire.
+// pointer already right is only touched, at most every touchAge, so it doesn't expire.
 func (s Store) NotePane(agent, pane string) error {
 	if agent == "" || pane == "" {
 		return nil
 	}
 	file := s.pointerFile(pane)
 	if readName(file) == agent {
-		if fi, err := os.Stat(file); err == nil && time.Since(fi.ModTime()) > paneTouchAge {
-			now := time.Now()
-			os.Chtimes(file, now, now)
-		}
+		touch(file)
 		return nil
 	}
 	if err := os.MkdirAll(s.panesDir(), 0o755); err != nil {
@@ -201,17 +199,56 @@ func (s Store) NotePane(agent, pane string) error {
 	if err := trail.WriteAtomic(file, []byte(agent+"\n")); err != nil {
 		return err
 	}
-	for _, f := range s.pointers() {
-		if fi, err := os.Stat(f); err == nil && time.Since(fi.ModTime()) > paneTTL {
-			os.Remove(f)
-		}
-	}
+	expire(s.panesDir())
 	return nil
 }
 
-// pointers are the pane pointer files, leaving out writes in progress.
-func (s Store) pointers() []string {
-	files, _ := filepath.Glob(filepath.Join(s.panesDir(), "*"))
+// touch bumps a file's time once it is touchAge old.
+func touch(file string) {
+	if fi, err := os.Stat(file); err == nil && time.Since(fi.ModTime()) > touchAge {
+		now := time.Now()
+		os.Chtimes(file, now, now)
+	}
+}
+
+// expire removes the files in dir untouched for stateTTL.
+func expire(dir string) {
+	for _, f := range listed(dir) {
+		if fi, err := os.Stat(f); err == nil && time.Since(fi.ModTime()) > stateTTL {
+			os.Remove(f)
+		}
+	}
+}
+
+// NoteHooked marks that the agent session ran cairn's hook.
+func (s Store) NoteHooked(agent string) error {
+	file := filepath.Join(s.hookedDir(), agent)
+	if _, err := os.Stat(file); err == nil {
+		touch(file)
+		return nil
+	}
+	if err := os.MkdirAll(s.hookedDir(), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		return err
+	}
+	expire(s.hookedDir())
+	return nil
+}
+
+// Hooked reports whether the agent session ran cairn's hook.
+func (s Store) Hooked(agent string) bool {
+	_, err := os.Stat(filepath.Join(s.hookedDir(), agent))
+	return err == nil
+}
+
+// pointers are the pane pointer files.
+func (s Store) pointers() []string { return listed(s.panesDir()) }
+
+// listed are the files in dir, leaving out writes in progress.
+func listed(dir string) []string {
+	files, _ := filepath.Glob(filepath.Join(dir, "*"))
 	return slices.DeleteFunc(files, func(f string) bool { return strings.HasPrefix(filepath.Base(f), ".") })
 }
 
