@@ -11,7 +11,7 @@ var tmux = host{
 	name:   "tmux",
 	prefix: "tmux",
 	env:    "TMUX_PANE",
-	tab:    func() string { return "" },
+	tab:    func() string { return tmuxWindow(os.Getenv("TMUX_PANE")) },
 	key: func(id string) string {
 		pid := tmuxServer(os.Getenv("TMUX"))
 		if pid == "" {
@@ -43,6 +43,16 @@ func tmuxPane(body string) string {
 		return "%" + n
 	}
 	return ""
+}
+
+// tmuxWindow is the name of the window holding a pane once renamed, which turns off its
+// automatic-rename; until then tmux names it after what runs there.
+func tmuxWindow(pane string) string {
+	auto, name, _ := strings.Cut(tmuxDisplay(pane, "#{automatic-rename} #W"), " ")
+	if auto != "0" {
+		return ""
+	}
+	return name
 }
 
 func tmuxDisplay(pane, format string) string {

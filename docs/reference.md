@@ -75,7 +75,7 @@ that follows the session:
 | Host | Pane key | Tab | Label |
 | --- | --- | --- | --- |
 | herdr | `herdr-<session>.<id>.<terminal>` from `$HERDR_SESSION` (else `default`), `$HERDR_PANE_ID` and the pane's terminal id in `herdr pane get` | none | the workspace's label |
-| tmux | `tmux-<pid>.<n>` from the server pid in `$TMUX` and `$TMUX_PANE` (`%3` is `tmux-<pid>.3`) | none | the tmux session's name |
+| tmux | `tmux-<pid>.<n>` from the server pid in `$TMUX` and `$TMUX_PANE` (`%3` is `tmux-<pid>.3`) | the window's name once renamed, which turns off its `automatic-rename` | the tmux session's name |
 | Herdr.app | `hc-<address>.<scope>` from `$HC_TERMINAL_ID` and `$HC_SCOPE`, titles and labels from the `hc` CLI | none | the app space in `hc get`'s `where` label |
 | Orca | `orca-<handle>` from `$ORCA_TERMINAL_HANDLE` | the worktree's directory name | the same |
 | Rex | `$REX_BLOCK` without its `block:` prefix | the label of the window holding the block, unless still Rex's `Window <last 8 of its id>` | the Rex session's label |
