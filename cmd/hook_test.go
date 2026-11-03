@@ -167,6 +167,26 @@ func TestHookSessionStart(t *testing.T) {
 	}
 }
 
+func TestHookSessionStartFolderHint(t *testing.T) {
+	dir, env := hookEnv(t)
+	repo := folderRepo(t, newApp(filepath.Join(dir, "home")))
+	start := `{"session_id":"s2","cwd":"` + repo + `","hook_event_name":"SessionStart","source":"startup"}`
+	want := `{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"cairn: this folder's branch feat/x is on trail t (0/2 steps done, next o/r#1). If you're continuing that work, run ` + "`cairn use t`" + `."}}` + "\n"
+	if out := runHookBin(t, dir, env, start); out != want {
+		t.Errorf("got  %s\nwant %s", out, want)
+	}
+	// Only a hint: the session stays off the trail, and no place is recorded.
+	if _, err := os.Stat(filepath.Join(dir, "home", "sessions", "s2.json")); err == nil {
+		t.Error("SessionStart wrote the session")
+	}
+
+	// In a folder whose branch is on no trail, nothing.
+	start = `{"session_id":"s2","cwd":"` + t.TempDir() + `","hook_event_name":"SessionStart","source":"startup"}`
+	if out := runHookBin(t, dir, env, start); out != "" {
+		t.Errorf("outside the repo: %q", out)
+	}
+}
+
 // Codex asks the user to trust a hook again whenever its definition in hooks.json
 // changes, so the file stays fixed and every change of behavior goes into cairn hook.
 func TestHooksFileUnchanged(t *testing.T) {

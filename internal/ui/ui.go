@@ -524,15 +524,24 @@ func (a App) Statusline(f session.Found) string {
 }
 
 // Context tells an agent starting a session which trail it's on, how far along and
-// what's next, from the cache alone; it is empty for a session without a trail.
-func (a App) Context(key string) string {
-	b := a.load(session.Found{Key: key, Trail: a.Sessions.Trail(key)})
-	if b.name == "" {
+// what's next, from the cache alone. A session without a trail hears of the trail of its
+// folder dir instead, and how to join it; without either it is empty.
+func (a App) Context(key, dir string) string {
+	if name := a.Sessions.Trail(key); name != "" {
+		return fmt.Sprintf("cairn: this session is on trail %s, %s. Run `cairn` to see it; `cairn skills get cairn` has the guide.", name, a.summary(name))
+	}
+	name, at := a.Sessions.ResolveDir(dir, a.Head)
+	if name == "" {
 		return ""
 	}
-	a.readPRs(b)
-	finished, total, next := progress(b.steps)
-	s := fmt.Sprintf("cairn: this session is on trail %s, %d/%d steps done", b.name, finished, total)
+	return fmt.Sprintf("cairn: this folder's branch %s is on trail %s (%s). If you're continuing that work, run `cairn use %s`.", at.Branch, name, a.summary(name), name)
+}
+
+// summary is a trail's progress and next step, from the cache alone.
+func (a App) summary(name string) string {
+	steps, _ := a.loadSteps(name)
+	finished, total, next := progress(a.withStates(steps))
+	s := fmt.Sprintf("%d/%d steps done", finished, total)
 	switch {
 	case next == nil:
 	case next.PR:
@@ -540,7 +549,7 @@ func (a App) Context(key string) string {
 	default:
 		s += ", next " + strconv.Quote(trail.Clean(next.Value))
 	}
-	return s + ". Run `cairn` to see it; `cairn skills get cairn` has the guide."
+	return s
 }
 
 // refreshInBackground starts a refresh unless one for the session is running.

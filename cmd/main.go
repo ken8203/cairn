@@ -400,7 +400,7 @@ func record(app ui.App, key string, o recordOpts) error {
 
 // runHook handles a Claude Code or Codex hook payload. It never fails the agent: errors
 // and panics are dropped, GitHub is asked from a detached `cairn record`, and only
-// SessionStart prints, for a session on a trail.
+// SessionStart prints, for a session on a trail or in a folder that has one.
 func runHook(app ui.App, in io.Reader, out io.Writer) {
 	defer func() { recover() }()
 	p, err := hook.Parse(in)
@@ -415,7 +415,7 @@ func runHook(app ui.App, in io.Reader, out io.Writer) {
 	case "SessionStart":
 		// The pane's panel switches to the new session at once.
 		app.Sessions.NotePane(p.SessionID, session.Pane())
-		if ctx := app.Context(p.SessionID); ctx != "" {
+		if ctx := app.Context(p.SessionID, p.Cwd); ctx != "" {
 			out.Write(hook.SessionStartOutput(ctx))
 		}
 	}
