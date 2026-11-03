@@ -39,6 +39,20 @@ esac
 echo "gh $*" >> "$FAKE/log"
 [ -e "$FAKE/gh-authed" ]
 `
+	fakeHerdr = `#!/bin/sh
+echo "herdr $*" >> "$FAKE/log"
+case "$*" in
+"plugin list --plugin cairn --json")
+	if [ -e "$FAKE/herdr-root" ]; then
+		root=$(/bin/cat "$FAKE/herdr-root")
+		cairn=$(/usr/bin/awk -F'"' '/^command = \[/ && /"panel"\]$/ {print $2; exit}' "$root/herdr-plugin.toml")
+		enabled=$(/bin/cat "$FAKE/herdr-enabled" 2>/dev/null || echo true)
+		echo "{\"result\":{\"plugins\":[{\"plugin_id\":\"cairn\",\"enabled\":$enabled,\"plugin_root\":\"$root\",\"actions\":[{\"id\":\"panel\",\"command\":[\"$cairn\",\"panel\"]}]}]}}"
+	else echo '{"result":{"plugins":[]}}'; fi ;;
+"plugin link "*) shift 2; echo "$*" > "$FAKE/herdr-root" ;;
+*) echo "unexpected: $*" >&2; exit 2 ;;
+esac
+`
 	trusted = `[hooks.state."cairn@cairn:hooks/hooks.json:session_start:0:0"]
 trusted_hash = "sha256:aa"
 
@@ -54,7 +68,7 @@ func fakes(t *testing.T, names ...string) string {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "bin")
 	os.Mkdir(bin, 0o755)
-	scripts := map[string]string{"claude": fakeClaude, "codex": fakeCodex, "gh": fakeGh}
+	scripts := map[string]string{"claude": fakeClaude, "codex": fakeCodex, "gh": fakeGh, "herdr": fakeHerdr}
 	for _, name := range names {
 		if err := os.WriteFile(filepath.Join(bin, name), []byte(scripts[name]), 0o755); err != nil {
 			t.Fatal(err)

@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 )
 
@@ -14,11 +15,12 @@ const (
 	Manual = "manual"
 )
 
-// Run installs cairn's plugin where it's missing, printing one `ok|done|skip|manual
-// <step>: <detail>` line per step; a manual line names what a person has to do. With
-// dryRun it changes nothing and says what it would run. It never edits a config file:
-// agents are changed only through their own plugin CLIs. It returns doctor's checks as
-// they stand after it, each CLI having been asked once.
+// Run installs cairn's plugin where it's missing, herdr's from a folder in env.Home,
+// printing one `ok|done|skip|manual <step>: <detail>` line per step; a manual line names
+// what a person has to do. With dryRun it changes nothing and says what it would run. It
+// never edits a config file: agents and herdr are changed only through their own plugin
+// CLIs. It returns doctor's checks as they stand after it, each CLI having been asked
+// once.
 func Run(w io.Writer, dryRun bool, env Env) []Check {
 	s := steps{w: w, dryRun: dryRun}
 	p := probeAll(true)
@@ -66,6 +68,7 @@ func Run(w io.Writer, dryRun bool, env Env) []Check {
 			s.line(Manual, c.Check, cmp.Or(c.Fix, c.Detail))
 		}
 	}
+	s.herdr(&p.herdr, filepath.Join(env.Home, "herdr-plugin"))
 	return p.checks(env)
 }
 

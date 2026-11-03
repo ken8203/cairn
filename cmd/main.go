@@ -70,7 +70,7 @@ const ttl = 60 * time.Second
 
 // where is what doctor reports about the terminal and agent session cairn runs in.
 func where(app ui.App) setup.Env {
-	return setup.Env{Host: host.Name, Pane: session.Pane, Agent: session.Agent, Trail: app.Sessions.Trail, Orca: func() string { return orcaDetail(app) }}
+	return setup.Env{Host: host.Name, Pane: session.Pane, Agent: session.Agent, Trail: app.Sessions.Trail, Orca: func() string { return orcaDetail(app) }, Home: app.Sessions.Dir}
 }
 
 // orcaDetail counts the Orca worktrees on trails, for doctor.
