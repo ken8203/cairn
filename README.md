@@ -18,17 +18,9 @@ Each agent session (a Claude Code or Codex session, or you in a plain terminal p
 on its own trail. Sessions share one only when asked to (`cairn use <name>`), so a
 teammate, or tomorrow's session, can pick up exactly where you left off.
 
-```
-checkout-v2  1/4 done
-
-  1   ✓ api#120   merged Add the checkout API
-  2 ▶ ◌ web#45    open   Checkout v2 page
-  3   ☐ release api 1.4
-  4   ☐ staging: enable CHECKOUT_V2
-
-Notes
-  - 2026-11-02 #45 waiting on review
-```
+<p align="center">
+  <img src="docs/demo.webp" width="900" alt="Claude Code in Rex opens a PR, cairn puts it on the trail, and the floating panel is refreshed, edited, scrolled and closed">
+</p>
 
 ## Install
 
