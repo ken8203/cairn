@@ -168,6 +168,7 @@ cairn record [--own] [--session id] [-C dir] [-R repo] [pr]   remember a PR (the
 `cairn@cairn` is installed and enabled in Claude Code and Codex, and both its hooks are
 trusted in `$CODEX_HOME/config.toml`, then the terminal host, pane and agent session.
 Untrusted or disabled Codex hooks are a `warn`, since setup can't trust them for you.
+Last, an `orca` line counts the Orca worktrees on trails, or says Orca isn't installed.
 
 `cairn skills get` prints guides built into the binary, so an agent reads the one that
 matches the cairn it runs. The plugin's `cairn` skill only points the agent there.
@@ -250,6 +251,29 @@ a failure is one line on stderr with exit 1.
 
 The panel fits itself to its pane as it's resized and refreshes every 60 seconds.
 
+### Orca workspaces
+
+cairn keeps the card of each Orca worktree whose folder is on a trail (see
+[Folders](#folders)) in sync with it, through the `orca` CLI, whichever terminal changed
+the trail:
+
+- the trail's PR in the worktree's repo whose head is its branch becomes the card's PR,
+  under reviews (`orca worktree set --worktree path:<dir> --pr <n> --json`);
+- the trail's other PRs, in any repo, are added as references when the card lacks them
+  (`orca reference add <url>... --worktree path:<dir> --json`);
+- the note becomes `cairn · checkout-v2 2/4 ▶ api#121`, or `cairn · checkout-v2 ✓ all
+  done` (`orca worktree set --worktree path:<dir> --comment <text> --json`).
+
+cairn writes a note only when it is empty or starts with `cairn · `: a note you wrote
+stays as it is. It never removes a PR or reference that left the trail, and calls
+`worktree set` only when something changed.
+
+The sync runs detached after `use`, `add`, `link`, `done`, `note`, a recorded PR and a
+background refresh of PR states, one at a time, so a burst of commands runs it once or
+twice. It looks for `orca` on `PATH`, then in `/Applications/Orca.app` and
+`~/Applications/Orca.app`, skips everything when `orca status` says the runtime isn't
+reachable, gives each call five seconds, and drops its errors.
+
 ## JSON
 
 `cairn show --json` (or `cairn --json`) prints this session's trail as one JSON object,
@@ -326,6 +350,7 @@ internal/github      PR state: one batched GraphQL request, the 60-second cache,
 internal/session     agent and pane ids, session files, pane pointers, auto-created trails, folder lookup
 internal/hook        agent hook payloads, and what a Bash command touched to record
 internal/host        the terminal cairn runs in: pane keys, labels, pane titles, the panel
+internal/orca        Orca worktree cards kept in sync with their trails
 internal/setup       setup through the agents' plugin CLIs, and doctor's checks
 internal/skills      the guides `cairn skills` prints, embedded
 internal/ui          show, ls, the statusline and the panel
@@ -337,6 +362,6 @@ skill. Codex trusts a hook by the hash of its definition, so `hooks/hooks.json` 
 changes; a test pins it, and new behavior goes into `cairn hook`.
 
 `cmd` wires the rest together and hands the host's label and title lookups in as
-functions; `trail`, `github`, `host`, `hook`, `setup` and `skills` import no other
+functions; `trail`, `github`, `host`, `orca`, `hook`, `setup` and `skills` import no other
 cairn package, `session` uses `trail` and `host`, and `ui` uses `trail`, `github` and
 `session`.

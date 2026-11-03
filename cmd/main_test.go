@@ -458,3 +458,93 @@ func TestWriteErrorsNameFolderTrail(t *testing.T) {
 		}
 	}
 }
+
+// fakeOrca puts an orca on PATH that lists the worktrees at paths and logs every call
+// that changes a card to the returned file.
+func fakeOrca(t *testing.T, paths ...string) string {
+	t.Helper()
+	dir := t.TempDir()
+	var wts []string
+	for _, p := range paths {
+		wts = append(wts, `{"id":"d058::`+p+`","repoId":"d058","path":"`+p+`","branch":"refs/heads/feat/x","comment":"","linkedPR":0,"isMainWorktree":false}`)
+	}
+	os.WriteFile(filepath.Join(dir, "list.json"), []byte(`{"result":{"totalCount":1,"truncated":false,"worktrees":[`+strings.Join(wts, ",")+`]}}`), 0o644)
+	script := `#!/bin/sh
+case "$1 $2" in
+"status --json") echo '{"result":{"runtime":{"reachable":true}}}' ;;
+"worktree list") cat "` + dir + `/list.json" ;;
+*) echo "$*" >> "` + dir + `/log" ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(dir, "orca"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return filepath.Join(dir, "log")
+}
+
+func TestOrcaSyncSpawned(t *testing.T) {
+	const u = "https://github.com/acme/api/pull/120"
+	app := testApp(t, map[string]github.PR{u: {Number: 120, State: "OPEN"}})
+	var spawned []string
+	app.Spawn = func(args ...string) error {
+		spawned = append(spawned, strings.Join(args, " "))
+		return nil
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "s1")
+	app.Sessions.Bind("s1", "t")
+
+	// Without Orca, nothing is started.
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	if err := run(app, []string{"add", "release"}); err != nil || len(spawned) > 0 {
+		t.Fatalf("without orca: %v, spawned %q", err, spawned)
+	}
+
+	fakeOrca(t)
+	if err := run(app, []string{"add", "flag on"}); err != nil || !slices.Equal(spawned, []string{"__orca"}) {
+		t.Fatalf("add: %v, spawned %q", err, spawned)
+	}
+	// While that sync holds its lock, a burst asks it to run again instead.
+	if err := run(app, []string{"done", "1"}); err != nil || len(spawned) != 1 {
+		t.Fatalf("done: %v, spawned %q", err, spawned)
+	}
+	if _, err := os.Stat(orcaAgain(app)); err != nil {
+		t.Errorf("no mark to run again: %v", err)
+	}
+	app.Cache.Unlock(orcaLock)
+	if err := run(app, []string{"done", "1"}); err != nil || len(spawned) != 2 {
+		t.Fatalf("done after the sync: %v, spawned %q", err, spawned)
+	}
+	app.Cache.Unlock(orcaLock)
+	if err := record(app, "s1", recordArgs([]string{"--own", u})); err != nil || len(spawned) != 3 {
+		t.Fatalf("record: %v, spawned %q", err, spawned)
+	}
+	// A failed change starts nothing.
+	app.Cache.Unlock(orcaLock)
+	if err := run(app, []string{"done", "9"}); err == nil || len(spawned) != 3 {
+		t.Errorf("failed done: %v, spawned %q", err, spawned)
+	}
+}
+
+// The detached sync decorates the worktree on a trail and leaves one on none alone.
+func TestOrcaSync(t *testing.T) {
+	bin, err := build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := cairnEnv(t)
+	i := slices.IndexFunc(env, func(kv string) bool { return strings.HasPrefix(kv, "CAIRN_HOME=") })
+	app := newApp(strings.TrimPrefix(env[i], "CAIRN_HOME="))
+	repo := folderRepo(t, app)
+	log := fakeOrca(t, repo, t.TempDir())
+	cmd := exec.Command(bin, "__orca")
+	cmd.Env = append(env, "PATH="+os.Getenv("PATH"))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("__orca: %v\n%s", err, out)
+	}
+	want := []string{"worktree set --worktree path:" + repo + " --pr 1 --comment cairn · t 0/2 ▶ r#1 --json"}
+	if got := readURLs(log); !slices.Equal(got, want) {
+		t.Errorf("orca calls %q, want %q", got, want)
+	}
+}

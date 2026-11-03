@@ -58,6 +58,8 @@ func (c Check) String() string {
 type Env struct {
 	Host, Pane, Agent func() string
 	Trail             func(session string) string
+	// Orca says how many Orca worktrees are on trails, or that Orca isn't installed.
+	Orca func() string
 }
 
 // plugin is an installed plugin as an agent's plugin list shows it.
@@ -256,7 +258,7 @@ func (p probe) checks(env Env) []Check {
 			s.Detail = id + ", on trail " + name
 		}
 	}
-	return append(cs, h, s)
+	return append(cs, h, s, Check{Check: "orca", Status: OK, Detail: env.Orca()})
 }
 
 // Doctor checks cairn's install, changing nothing: this binary on PATH, gh, the plugin in

@@ -20,6 +20,7 @@ import (
 	"github.com/ken8203/cairn/internal/github"
 	"github.com/ken8203/cairn/internal/hook"
 	"github.com/ken8203/cairn/internal/host"
+	"github.com/ken8203/cairn/internal/orca"
 	"github.com/ken8203/cairn/internal/session"
 	"github.com/ken8203/cairn/internal/setup"
 	"github.com/ken8203/cairn/internal/skills"
@@ -67,7 +68,19 @@ const ttl = 60 * time.Second
 
 // where is what doctor reports about the terminal and agent session cairn runs in.
 func where(app ui.App) setup.Env {
-	return setup.Env{Host: host.Name, Pane: session.Pane, Agent: session.Agent, Trail: app.Sessions.Trail}
+	return setup.Env{Host: host.Name, Pane: session.Pane, Agent: session.Agent, Trail: app.Sessions.Trail, Orca: func() string { return orcaDetail(app) }}
+}
+
+// orcaDetail counts the Orca worktrees on trails, for doctor.
+func orcaDetail(app ui.App) string {
+	n, err := orca.Count(func(dir string) (orca.Card, bool) { return card(app, dir) })
+	switch {
+	case errors.Is(err, orca.ErrNotInstalled):
+		return "not installed"
+	case err != nil:
+		return "not reachable"
+	}
+	return fmt.Sprintf("%d worktrees on cairn trails", n)
 }
 
 // newApp wires cairn's home, its state and cache, to the real GitHub and terminal hosts.
@@ -155,7 +168,7 @@ func run(app ui.App, args []string) error {
 		if arg(1) == "" {
 			return errors.New("usage: cairn use <name>")
 		}
-		return sessions.Bind(key(), arg(1))
+		return synced(app, sessions.Bind(key(), arg(1)))
 	case "add":
 		name, err := trailOr()
 		if err != nil {
@@ -164,7 +177,7 @@ func run(app ui.App, args []string) error {
 		if len(args) < 2 {
 			return errors.New("usage: cairn add <owner/repo#n | PR URL | text>...")
 		}
-		return add(app, name, args[1:])
+		return synced(app, add(app, name, args[1:]))
 	case "link":
 		name, err := trailOr()
 		if err != nil {
@@ -178,7 +191,7 @@ func run(app ui.App, args []string) error {
 		if !app.Cache.Exists(trail.URL(ref)) {
 			return fmt.Errorf("%s: no such PR", ref)
 		}
-		return trails.Link(name, n, ref)
+		return synced(app, trails.Link(name, n, ref))
 	case "done":
 		name, err := trailOr()
 		if err != nil {
@@ -188,7 +201,7 @@ func run(app ui.App, args []string) error {
 		if !ok {
 			return errors.New("usage: cairn done <step number>")
 		}
-		return trails.Tick(name, n)
+		return synced(app, trails.Tick(name, n))
 	case "note":
 		name, err := trailOr()
 		if err != nil {
@@ -197,7 +210,7 @@ func run(app ui.App, args []string) error {
 		if len(args) < 2 {
 			return errors.New("usage: cairn note <text>")
 		}
-		return trails.Note(name, strings.Join(args[1:], " "))
+		return synced(app, trails.Note(name, strings.Join(args[1:], " ")))
 	case "edit":
 		name := arg(1)
 		if name == "" && key() != "" {
@@ -276,6 +289,18 @@ func run(app ui.App, args []string) error {
 		}
 		defer app.Cache.Unlock(args[1])
 		app.Cache.Refresh(false, args[2:])
+		syncOrca(app)
+	case "__orca":
+		// The detached Orca sync, run again while commands asked for one during it.
+		for {
+			time.Sleep(orcaDebounce)
+			os.Remove(orcaAgain(app))
+			orca.Sync(func(dir string) (orca.Card, bool) { return card(app, dir) })
+			app.Cache.Unlock(orcaLock)
+			if _, err := os.Stat(orcaAgain(app)); err != nil || !app.Cache.TryLock(orcaLock) {
+				return nil
+			}
+		}
 	case "doctor":
 		return report(setup.Doctor(where(app)), slices.Contains(args[1:], "--json"))
 	case "setup":
@@ -395,7 +420,57 @@ func record(app ui.App, key string, o recordOpts) error {
 		return nil
 	}
 	at, _ := session.Where(o.dir)
-	return app.Sessions.Record(key, url, o.own, p.Head, at)
+	return synced(app, app.Sessions.Record(key, url, o.own, p.Head, at))
+}
+
+// orcaLock is the refresh lock the Orca sync holds, and orcaDebounce how long it waits
+// for the rest of a burst of commands.
+const (
+	orcaLock     = "__orca"
+	orcaDebounce = 300 * time.Millisecond
+)
+
+// orcaAgain marks that a sync was asked for, so a running one runs again.
+func orcaAgain(app ui.App) string { return filepath.Join(app.Cache.Dir, ".orca-again") }
+
+// synced starts an Orca sync after a change that succeeded.
+func synced(app ui.App, err error) error {
+	if err == nil {
+		syncOrca(app)
+	}
+	return err
+}
+
+// syncOrca starts a detached `cairn __orca` when Orca is installed, unless one is
+// running: that one then runs again.
+func syncOrca(app ui.App) {
+	if orca.Path() == "" || os.MkdirAll(app.Cache.Dir, 0o755) != nil {
+		return
+	}
+	os.WriteFile(orcaAgain(app), nil, 0o644)
+	if app.Cache.TryLock(orcaLock) && app.Spawn("__orca") != nil {
+		app.Cache.Unlock(orcaLock)
+	}
+}
+
+// card is what the card of an Orca worktree at dir shows of the trail its folder is on.
+func card(app ui.App, dir string) (orca.Card, bool) {
+	name, at := app.Sessions.ResolveDir(dir, app.Head)
+	if name == "" {
+		return orca.Card{}, false
+	}
+	c := orca.Card{Repo: at.Repo}
+	for _, url := range app.Sessions.Trails.URLs(name) {
+		repo, _, _ := strings.Cut(trail.Ref(url), "#")
+		if p, ok := app.Cache.Read(url); ok && c.PR == 0 && strings.EqualFold(repo, at.Repo) && p.Head == at.Branch {
+			c.PR = p.Number
+			continue
+		}
+		c.Refs = append(c.Refs, url)
+	}
+	done, total, next := app.Progress(name)
+	c.Note = orca.Note(name, done, total, next)
+	return c, true
 }
 
 // runHook handles a Claude Code or Codex hook payload. It never fails the agent: errors

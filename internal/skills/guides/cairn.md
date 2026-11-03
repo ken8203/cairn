@@ -49,6 +49,8 @@ Step numbers are the row numbers `cairn` prints.
 - Run `cairn` to check where things stand before reporting progress.
 - When the user asks to see the trail, run `cairn panel`; when you need it as data, run
   `cairn show --json`.
+- In Orca, each worktree's card shows its trail's PRs and a `cairn · ` note on its own;
+  don't set them with `orca worktree set` yourself.
 
 Don't create a trail for one-off work with a single PR; the hook records it anyway.
 <!-- full -->
