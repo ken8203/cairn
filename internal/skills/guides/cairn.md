@@ -36,6 +36,9 @@ Step numbers are the row numbers `cairn` prints.
 
 ## What to do
 
+- When a session starts, cairn may say this folder's branch is on a trail. If you're
+  continuing that work, run `cairn use <name>` to join it; otherwise leave it alone.
+  Until you join, `cairn` shows that trail but `add`, `done`, `note` and `link` refuse.
 - At the start of multi-PR or multi-step work, `cairn use <short-name>` (or join the
   trail the user names), then `cairn add` the steps you already know, in order.
 - Add steps that aren't PRs as free text: `cairn add "release api 5.7" "enable FLAG on
@@ -58,7 +61,9 @@ Don't create a trail for one-off work with a single PR; the hook records it anyw
   that trail. `cairn use <name>` is the only way to share one.
 - A PR whose base branch is another step's head is shown as stacked.
 - `cairn add` refuses a PR GitHub doesn't know.
-- Trails are Markdown files in `${XDG_STATE_HOME:-~/.local/state}/cairn/trails/`; the
-  user may edit them with `cairn edit`.
+- Trails are Markdown files in `~/.cairn/trails/` (`$CAIRN_HOME/trails/`); the user may
+  edit them with `cairn edit`.
+- A folder finds its trail by a PR on it whose head is the folder's branch, or by a
+  session that recorded a PR from that worktree and branch.
 - Sessions are keyed by `$CODEX_THREAD_ID`, else `$CLAUDE_CODE_SESSION_ID`, else the
   terminal pane, so commands you run act on your own session.

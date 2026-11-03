@@ -67,8 +67,20 @@ type Cache struct {
 	Query func(urls []string) (map[string]PR, error)
 }
 
+// file is prs/<owner>/<repo>/<n>.json under Dir.
 func (c Cache) file(url string) string {
-	return filepath.Join(c.Dir, strings.ReplaceAll(strings.TrimPrefix(url, "https://github.com/"), "/", "-")+".json")
+	repo, n, _ := strings.CutLast(strings.TrimPrefix(url, "https://github.com/"), "/pull/")
+	owner, name, _ := strings.Cut(repo, "/")
+	return filepath.Join(c.Dir, "prs", dirName(owner), dirName(name), n+".json")
+}
+
+// dirName keeps a URL's owner or repo inside the cache: no GitHub name is . or .., but a
+// URL may say so.
+func dirName(s string) string {
+	if s == "." || s == ".." {
+		return strings.ReplaceAll(s, ".", "_")
+	}
+	return s
 }
 
 // Fresh reports whether the PR was fetched within TTL.
@@ -126,12 +138,9 @@ func (c Cache) Fetch(urls []string) {
 	if err != nil {
 		return
 	}
-	if err := os.MkdirAll(c.Dir, 0o755); err != nil {
-		return
-	}
 	for url, p := range got {
 		b, err := json.Marshal(p)
-		if err == nil {
+		if err == nil && os.MkdirAll(filepath.Dir(c.file(url)), 0o755) == nil {
 			writeAtomic(c.file(url), b)
 		}
 	}

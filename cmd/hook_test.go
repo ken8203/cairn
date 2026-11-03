@@ -60,7 +60,7 @@ func waitLog(path string, n int) []string {
 }
 
 // hookEnv puts the built cairn in a temp dir beside a stub cairn that logs what it would
-// record, with temp state and cache dirs.
+// record, with a temp home.
 func hookEnv(t *testing.T) (dir string, env []string) {
 	t.Helper()
 	bin, err := build()
@@ -79,8 +79,7 @@ echo "$* pane=$REX_BLOCK" >> "$LOG"
 		"PATH=/usr/bin:/bin",
 		"HOME=" + dir,
 		"LOG=" + filepath.Join(dir, "log"),
-		"XDG_STATE_HOME=" + filepath.Join(dir, "state"),
-		"XDG_CACHE_HOME=" + filepath.Join(dir, "cache"),
+		"CAIRN_HOME=" + filepath.Join(dir, "home"),
 	}
 	return dir, env
 }
@@ -110,7 +109,7 @@ func TestHookSpawnsRecord(t *testing.T) {
 		{
 			"Codex pr create",
 			`{"session_id":"01a19fee-0b76","turn_id":"t","cwd":"/abs","hook_event_name":"PostToolUse","model":"m","tool_name":"Bash","tool_input":{"command":"gh pr create --fill"},"tool_response":"https://github.com/o/r/pull/998\n"}`,
-			[]string{"record --session 01a19fee-0b76 --own https://github.com/o/r/pull/998 pane=block:p1"},
+			[]string{"record --session 01a19fee-0b76 --own -C /abs https://github.com/o/r/pull/998 pane=block:p1"},
 		},
 		{
 			"unrelated command",
@@ -149,10 +148,10 @@ func TestHookSessionStart(t *testing.T) {
 		t.Errorf("without a trail: %q", out)
 	}
 
-	state := filepath.Join(dir, "state", "cairn")
+	state := filepath.Join(dir, "home")
 	for file, content := range map[string]string{
-		"trails/t.md":       "# t\n\n- [x] release\n- [ ] flag on\n\n## Notes\n",
-		"sessions/s1.trail": "t\n",
+		"trails/t.md":      "# t\n\n- [x] release\n- [ ] flag on\n\n## Notes\n",
+		"sessions/s1.json": `{"trail":"t","prs":[],"updated":"2026-11-03T10:00:00Z"}` + "\n",
 	} {
 		os.MkdirAll(filepath.Dir(filepath.Join(state, file)), 0o755)
 		if err := os.WriteFile(filepath.Join(state, file), []byte(content), 0o644); err != nil {
@@ -163,8 +162,28 @@ func TestHookSessionStart(t *testing.T) {
 	if out := runHookBin(t, dir, append(env, "REX_BLOCK=block:p1"), start); out != want {
 		t.Errorf("got  %s\nwant %s", out, want)
 	}
-	if got := readName(filepath.Join(state, "panes", "p1.session")); got != "s1" {
+	if got := readName(filepath.Join(state, "panes", "p1")); got != "s1" {
 		t.Errorf("pane points at %q", got)
+	}
+}
+
+func TestHookSessionStartFolderHint(t *testing.T) {
+	dir, env := hookEnv(t)
+	repo := folderRepo(t, newApp(filepath.Join(dir, "home")))
+	start := `{"session_id":"s2","cwd":"` + repo + `","hook_event_name":"SessionStart","source":"startup"}`
+	want := `{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"cairn: this folder's branch feat/x is on trail t (0/2 steps done, next o/r#1). If you're continuing that work, run ` + "`cairn use t`" + `."}}` + "\n"
+	if out := runHookBin(t, dir, env, start); out != want {
+		t.Errorf("got  %s\nwant %s", out, want)
+	}
+	// Only a hint: the session stays off the trail, and no place is recorded.
+	if _, err := os.Stat(filepath.Join(dir, "home", "sessions", "s2.json")); err == nil {
+		t.Error("SessionStart wrote the session")
+	}
+
+	// In a folder whose branch is on no trail, nothing.
+	start = `{"session_id":"s2","cwd":"` + t.TempDir() + `","hook_event_name":"SessionStart","source":"startup"}`
+	if out := runHookBin(t, dir, env, start); out != "" {
+		t.Errorf("outside the repo: %q", out)
 	}
 }
 

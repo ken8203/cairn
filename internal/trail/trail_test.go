@@ -159,13 +159,13 @@ func TestMissingTrail(t *testing.T) {
 func TestNote(t *testing.T) {
 	s := Store{Dir: t.TempDir()}
 	writeTrail(t, s, "t", "# t\n\n## Notes\n")
-	for _, n := range []string{"11-05 dated", "12-01", "plain\x1b[31m", "1-2 not a date"} {
+	for _, n := range []string{"2026-11-05 dated", "11-05 old", "12-01", "plain\x1b[31m", "1-2 not a date", "26-11-05 short year"} {
 		if err := s.Note("t", n); err != nil {
 			t.Fatal(err)
 		}
 	}
-	today := time.Now().Format("01-02")
-	want := "# t\n\n## Notes\n- 11-05 dated\n- 12-01\n- " + today + " plain[31m\n- " + today + " 1-2 not a date\n"
+	today := time.Now().Format(time.DateOnly)
+	want := "# t\n\n## Notes\n- 2026-11-05 dated\n- 11-05 old\n- 12-01\n- " + today + " plain[31m\n- " + today + " 1-2 not a date\n- " + today + " 26-11-05 short year\n"
 	if got := readTrail(t, s, "t"); got != want {
 		t.Errorf("got %q\nwant %q", got, want)
 	}

@@ -151,8 +151,15 @@ func TestExists(t *testing.T) {
 
 func TestCacheFile(t *testing.T) {
 	c := Cache{Dir: t.TempDir()}
-	if got := c.file("https://github.com/o/r/pull/5"); filepath.Base(got) != "o-r-pull-5.json" {
-		t.Errorf("file = %q", got)
+	for url, want := range map[string]string{
+		"https://github.com/o/r/pull/5":    "prs/o/r/5.json",
+		"https://github.com/../../pull/5":  "prs/__/__/5.json",
+		"https://github.com/o/../pull/5":   "prs/o/__/5.json",
+		"https://github.com/o/r.go/pull/5": "prs/o/r.go/5.json",
+	} {
+		if got := c.file(url); got != filepath.Join(c.Dir, want) {
+			t.Errorf("file(%q) = %q", url, got)
+		}
 	}
 }
 
@@ -177,7 +184,7 @@ func TestTryLock(t *testing.T) {
 
 func writeCache(t *testing.T, c Cache, url string, p PR) {
 	t.Helper()
-	if err := os.MkdirAll(c.Dir, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(c.file(url)), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	b, _ := json.Marshal(p)

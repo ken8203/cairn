@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -59,19 +60,31 @@ func Editor(file string) *exec.Cmd {
 	return exec.Command(argv[0], append(argv[1:], file)...)
 }
 
-// Show is a session's trail and the PRs it touched as terminal lines, refreshing stale
-// PRs first; width 0 leaves titles whole.
-func (a App) Show(key string, width int) []string {
-	return render(a.gather(key, false), width).lines
+// Find is what the views show for the agent's session, else the pane's, else the folder
+// dir; see session.Store.Find.
+func (a App) Find(agent, pane, dir string) session.Found {
+	return a.Sessions.Find(agent, pane, dir, a.Head)
 }
 
-// Data is a session's trail and the PRs it touched as `cairn show --json` prints them,
+// Head is a PR's cached head branch, empty until fetched.
+func (a App) Head(url string) string {
+	p, _ := a.Cache.Read(url)
+	return p.Head
+}
+
+// Show is a trail and the PRs its session touched as terminal lines, refreshing stale PRs
+// first; width 0 leaves titles whole.
+func (a App) Show(f session.Found, width int) []string {
+	return render(a.gather(f, false), width).lines
+}
+
+// Data is a trail and the PRs its session touched as `cairn show --json` prints them,
 // read from the cache alone; stale PRs are refreshed in the background.
-func (a App) Data(key string) Data {
-	b := a.load(key)
+func (a App) Data(f session.Found) Data {
+	b := a.load(f)
 	urls := b.urls()
 	if slices.ContainsFunc(urls, func(u string) bool { return !a.Cache.Fresh(u) }) {
-		a.refreshInBackground(key, urls)
+		a.refreshInBackground(b.key, urls)
 	}
 	a.readPRs(b)
 
@@ -103,7 +116,7 @@ func (a App) Data(key string) Data {
 			}
 			t.Steps = append(t.Steps, sd)
 		}
-		d.Trail = t
+		d.Trail, d.Via = t, b.via
 		for _, url := range b.touched {
 			if !slices.ContainsFunc(b.steps, func(s step) bool { return s.Value == url }) {
 				untracked = append(untracked, url)
@@ -121,6 +134,8 @@ func (a App) Data(key string) Data {
 // Data is what `cairn show --json` prints; Trail is nil for a session without one.
 type Data struct {
 	Trail *TrailData `json:"trail"`
+	// Via is how the trail was found: session, pane or dir.
+	Via string `json:"via,omitempty"`
 	// PRs are those the session touched that aren't on its trail.
 	PRs []PRData `json:"prs"`
 }
@@ -201,10 +216,13 @@ type view struct {
 	targets []string
 }
 
-// board is what a session shows, each file read once: its trail's steps and notes, the PRs
-// it touched, and once read, every PR's cached state and the other sessions on them.
+// board is what a session shows, each file read once: its trail's steps and notes and how
+// the trail was found, the PRs it touched, and once read, every PR's cached state and the
+// other sessions on them.
 type board struct {
 	key, name string
+	via       string
+	place     session.Place
 	steps     []step
 	notes     []string
 	touched   []string
@@ -212,18 +230,17 @@ type board struct {
 	owners    map[string]string // pane titles of the other sessions that touched a PR
 }
 
-func (a App) load(key string) *board {
-	b := &board{key: key, name: a.Sessions.Trail(key), touched: a.Sessions.URLs(key)}
+func (a App) load(f session.Found) *board {
+	b := &board{key: f.Key, name: f.Trail, via: f.Via, place: f.Place, touched: a.Sessions.URLs(f.Key)}
 	if b.name != "" {
 		b.steps, b.notes = a.loadSteps(b.name)
 	}
 	return b
 }
 
-// gather loads a session's board for its view, refreshing stale PRs first, or all with
-// force.
-func (a App) gather(key string, force bool) *board {
-	b := a.load(key)
+// gather loads a board for its view, refreshing stale PRs first, or all with force.
+func (a App) gather(f session.Found, force bool) *board {
+	b := a.load(f)
 	a.Cache.Refresh(force, b.urls())
 	a.readPRs(b)
 	a.readOwners(b)
@@ -368,7 +385,11 @@ func render(b *board, width int) *view {
 			}
 		}
 
-		v.lines = append(v.lines, bold(b.name)+"  "+dim(fmt.Sprintf("%d/%d done", done, len(b.steps))), "")
+		v.lines = append(v.lines, bold(b.name)+"  "+dim(fmt.Sprintf("%d/%d done", done, len(b.steps))))
+		if b.via == "dir" {
+			v.lines = append(v.lines, dim(fmt.Sprintf("found by folder: %s on %s — `cairn use %s` to join", filepath.Base(b.place.Dir), b.place.Branch, b.name)))
+		}
+		v.lines = append(v.lines, "")
 		for i, s := range b.steps {
 			marker := " "
 			if i == next {
@@ -464,14 +485,14 @@ func withMark(s, ci string) string {
 	return s
 }
 
-// Statusline is the session's trail, its progress and next step, or without a trail the
-// open PRs it touched. It answers from the cache and refreshes stale PRs in the
+// Statusline is the trail, its progress and next step, or without a trail the open PRs
+// its session touched. It answers from the cache and refreshes stale PRs in the
 // background.
-func (a App) Statusline(key string) string {
-	b := a.load(key)
+func (a App) Statusline(f session.Found) string {
+	b := a.load(f)
 	urls := b.urls()
 	if slices.ContainsFunc(urls, func(u string) bool { return !a.Cache.Fresh(u) }) {
-		a.refreshInBackground(key, urls)
+		a.refreshInBackground(b.key, urls)
 	}
 	a.readPRs(b)
 
@@ -503,15 +524,24 @@ func (a App) Statusline(key string) string {
 }
 
 // Context tells an agent starting a session which trail it's on, how far along and
-// what's next, from the cache alone; it is empty for a session without a trail.
-func (a App) Context(key string) string {
-	b := a.load(key)
-	if b.name == "" {
+// what's next, from the cache alone. A session without a trail hears of the trail of its
+// folder dir instead, and how to join it; without either it is empty.
+func (a App) Context(key, dir string) string {
+	if name := a.Sessions.Trail(key); name != "" {
+		return fmt.Sprintf("cairn: this session is on trail %s, %s. Run `cairn` to see it; `cairn skills get cairn` has the guide.", name, a.summary(name))
+	}
+	name, at := a.Sessions.ResolveDir(dir, a.Head)
+	if name == "" {
 		return ""
 	}
-	a.readPRs(b)
-	finished, total, next := progress(b.steps)
-	s := fmt.Sprintf("cairn: this session is on trail %s, %d/%d steps done", b.name, finished, total)
+	return fmt.Sprintf("cairn: this folder's branch %s is on trail %s (%s). If you're continuing that work, run `cairn use %s`.", at.Branch, name, a.summary(name), name)
+}
+
+// summary is a trail's progress and next step, from the cache alone.
+func (a App) summary(name string) string {
+	steps, _ := a.loadSteps(name)
+	finished, total, next := progress(a.withStates(steps))
+	s := fmt.Sprintf("%d/%d steps done", finished, total)
 	switch {
 	case next == nil:
 	case next.PR:
@@ -519,7 +549,7 @@ func (a App) Context(key string) string {
 	default:
 		s += ", next " + strconv.Quote(trail.Clean(next.Value))
 	}
-	return s + ". Run `cairn` to see it; `cairn skills get cairn` has the guide."
+	return s
 }
 
 // refreshInBackground starts a refresh unless one for the session is running.

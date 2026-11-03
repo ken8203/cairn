@@ -55,11 +55,22 @@ func readTrail(t *testing.T, a App, name string) string {
 	return string(b)
 }
 
-func sessionsDir(a App) string                  { return filepath.Join(a.Sessions.Dir, "sessions") }
-func panesDir(a App) string                     { return filepath.Join(a.Sessions.Dir, "panes") }
-func sessionPRsFile(a App, key string) string   { return filepath.Join(sessionsDir(a), key+".prs") }
-func sessionTrailFile(a App, key string) string { return filepath.Join(sessionsDir(a), key+".trail") }
-func pointerFile(a App, pane string) string     { return filepath.Join(panesDir(a), pane+".session") }
+// touch records PRs the session touched without authoring them.
+func touch(t *testing.T, a App, key string, urls ...string) {
+	t.Helper()
+	for _, u := range urls {
+		if err := a.Sessions.Record(key, u, false, "", session.Place{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func pointTo(t *testing.T, a App, pane, key string) {
+	t.Helper()
+	if err := a.Sessions.NotePane(key, pane); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestShortRef(t *testing.T) {
 	if got := shortRef("o/r#5"); got != "r#5" {
@@ -72,7 +83,7 @@ func TestStatuslineFollowsPaneSession(t *testing.T) {
 	writeTrail(t, a, "b", "# b\n\n- [ ] beta\n")
 	a.Sessions.Bind("s2", "b")
 	a.Sessions.NotePane("s2", "p1")
-	if got := a.Statusline(a.Sessions.PaneSession("p1")); got != "b 0/1 · ▶ beta" {
+	if got := a.Statusline(a.Find("", "p1", "")); got != "b 0/1 · ▶ beta" {
 		t.Errorf("statusline = %q", got)
 	}
 }
@@ -85,16 +96,14 @@ func TestOwnersAcrossSessions(t *testing.T) {
 		asked.Add(1)
 		return map[string]string{"pa": "Pane A", "pb": "Pane B"}[pane]
 	}
-	os.MkdirAll(sessionsDir(a), 0o755)
-	os.MkdirAll(panesDir(a), 0o755)
 	for _, s := range []string{"s2", "s3", "s4", "s5"} {
-		os.WriteFile(sessionPRsFile(a, s), []byte(url+"\n"), 0o644)
+		touch(t, a, s, url)
 	}
-	os.WriteFile(sessionPRsFile(a, "s1"), []byte(mine+"\n"), 0o644)
-	os.WriteFile(pointerFile(a, "pa"), []byte("s2\n"), 0o644)
-	os.WriteFile(pointerFile(a, "pb"), []byte("s3\n"), 0o644)
-	os.WriteFile(pointerFile(a, "gone"), []byte("s4\n"), 0o644) // a pane its host no longer knows
-	os.WriteFile(pointerFile(a, "idle"), []byte("s9\n"), 0o644) // a pane whose session touched nothing here
+	touch(t, a, "s1", mine)
+	pointTo(t, a, "pa", "s2")
+	pointTo(t, a, "pb", "s3")
+	pointTo(t, a, "gone", "s4") // a pane its host no longer knows
+	pointTo(t, a, "idle", "s9") // a pane whose session touched nothing here
 	// s5 last ran in no pane.
 	b := &board{key: "s1", touched: []string{mine}, steps: []step{{Step: trail.Step{PR: true, Value: url}}, {Step: trail.Step{PR: true, Value: mine}}}}
 	a.readOwners(b)
@@ -122,7 +131,7 @@ func TestListCountsSessions(t *testing.T) {
 		a.Sessions.Bind(s, "t")
 	}
 	a.Sessions.Bind("s3", "u")
-	os.WriteFile(sessionTrailFile(a, "s4"), nil, 0o644)
+	touch(t, a, "s4", "https://github.com/o/r/pull/1")
 	out := a.List()
 	if !strings.Contains(out, dim("2 session(s)")) || !strings.Contains(out, dim("1 session(s)")) || strings.Contains(out, "pane") {
 		t.Errorf("ls:\n%s", out)
@@ -135,7 +144,7 @@ func TestRenderWideTitles(t *testing.T) {
 	writeTrail(t, a, "t", "# t\n\n- [ ] o/r#1\n")
 	a.Sessions.Bind("s1", "t")
 	const width = 60
-	line := render(a.gather("s1", false), width).lines[2]
+	line := render(a.gather(a.Find("s1", "", ""), false), width).lines[2]
 	if w := ansi.StringWidth(line); w > width || !strings.HasSuffix(line, "…") {
 		t.Errorf("%d columns: %q", w, line)
 	}
@@ -159,8 +168,8 @@ func TestData(t *testing.T) {
 
 	writeTrail(t, a, "t", "# t\n\n- [ ] o/r#1\n- [ ] o/r#2\n- [x] release\n- [ ] flag\n\n## Notes\n\n- 11-02 waiting\n")
 	a.Sessions.Bind("s1", "t")
-	os.WriteFile(sessionPRsFile(a, "s1"), []byte(stacked+"\n"+other+"\n"), 0o644)
-	b, err := json.Marshal(a.Data("s1"))
+	touch(t, a, "s1", stacked, other)
+	b, err := json.Marshal(a.Data(a.Find("s1", "", "")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +178,7 @@ func TestData(t *testing.T) {
 		`{"n":2,"kind":"pr","done":false,"ref":"o/r#2","url":"` + stacked + `","title":"Use API","state":"draft","ci":"pending","stacked_on":"o/r#1"},` +
 		`{"n":3,"kind":"text","text":"release","done":true},` +
 		`{"n":4,"kind":"text","text":"flag","done":false}],` +
-		`"notes":["11-02 waiting"]},` +
+		`"notes":["11-02 waiting"]},"via":"session",` +
 		`"prs":[{"ref":"o/s#3","url":"` + other + `","title":"Side fix","state":"open","ci":"fail"}]}`
 	if string(b) != want {
 		t.Errorf("got\n%s\nwant\n%s", b, want)
@@ -180,16 +189,34 @@ func TestData(t *testing.T) {
 
 	// Without a trail: null, and the touched PRs, refreshing the one never fetched in the
 	// background.
-	os.WriteFile(sessionPRsFile(a, "s2"), []byte(unknown+"\n"), 0o644)
-	b, _ = json.Marshal(a.Data("s2"))
+	touch(t, a, "s2", unknown)
+	b, _ = json.Marshal(a.Data(a.Find("s2", "", "")))
 	if want := `{"trail":null,"prs":[{"ref":"o/s#4","url":"` + unknown + `","state":"unknown","ci":"none"}]}`; string(b) != want {
 		t.Errorf("got %s", b)
 	}
 	if len(spawned) == 0 || spawned[0] != "__refresh" {
 		t.Errorf("spawned %q", spawned)
 	}
-	b, _ = json.Marshal(a.Data("s3"))
+	b, _ = json.Marshal(a.Data(a.Find("s3", "", "")))
 	if string(b) != `{"trail":null,"prs":[]}` {
 		t.Errorf("got %s", b)
+	}
+}
+
+func TestShowFoundByFolder(t *testing.T) {
+	a := newApp(t, nil)
+	writeTrail(t, a, "t", "# t\n\n- [ ] x\n")
+	f := session.Found{Key: "s1", Trail: "t", Via: "dir", Place: session.Place{Dir: "/w/cairn", Repo: "o/cairn", Branch: "feat/x"}}
+	got := a.Show(f, 0)
+	if len(got) < 3 || got[1] != dim("found by folder: cairn on feat/x — `cairn use t` to join") || got[2] != "" {
+		t.Errorf("show:\n%s", strings.Join(got, "\n"))
+	}
+	b, _ := json.Marshal(a.Data(f))
+	if !strings.Contains(string(b), `"via":"dir"`) {
+		t.Errorf("data = %s", b)
+	}
+	f.Via = "session"
+	if got := a.Show(f, 0); got[1] != "" {
+		t.Errorf("own trail says %q", got[1])
 	}
 }

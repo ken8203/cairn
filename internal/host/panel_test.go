@@ -37,7 +37,7 @@ const cairn = "/opt/my bin/cairn"
 
 func TestPanelNoPane(t *testing.T) {
 	clearEnv(t)
-	if err := Panel(cairn, "", false); !errors.Is(err, ErrNoPanel) {
+	if err := Panel(cairn, "", "", false); !errors.Is(err, ErrNoPanel) {
 		t.Errorf("Panel outside every host = %v", err)
 	}
 }
@@ -46,13 +46,20 @@ func TestRexPanel(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("REX_BLOCK", "block:b1")
 	dir, log := fakeCLIs(t, map[string]string{"rex": "cat > stdin"})
-	if err := Panel(cairn, "", true); err != nil {
+	if err := Panel(cairn, "", "", true); err != nil {
 		t.Fatal(err)
 	}
 	wantLog(t, log(), `rex do - -b block:b1 --args {"block":"block:b1","command":["/opt/my bin/cairn","watch","b1"],"close":true,"label":"cairn"}`)
 	if b, _ := os.ReadFile(filepath.Join(dir, "stdin")); string(b) != rexPanelLua {
 		t.Errorf("rex read %q", b)
 	}
+
+	// The panel falls back to the caller's folder.
+	_, log = fakeCLIs(t, map[string]string{"rex": "cat > stdin"})
+	if err := Panel(cairn, "", "/w/my repo", false); err != nil {
+		t.Fatal(err)
+	}
+	wantLog(t, log(), `rex do - -b block:b1 --args {"block":"block:b1","command":["/opt/my bin/cairn","watch","b1","--dir","/w/my repo"],"close":false,"label":"cairn"}`)
 }
 
 func TestTmuxPanel(t *testing.T) {
@@ -60,13 +67,13 @@ func TestTmuxPanel(t *testing.T) {
 	t.Setenv("TMUX", tmuxEnv)
 	t.Setenv("TMUX_PANE", "%3")
 	_, log := fakeCLIs(t, map[string]string{"tmux": ""})
-	if err := Panel(cairn, "", false); err != nil {
+	if err := Panel(cairn, "", "", false); err != nil {
 		t.Fatal(err)
 	}
 	wantLog(t, log(), `tmux run-shell -b -t %3 'tmux' 'display-popup' '-E' '-w' '80%' '-h' '50%' '-t' '%3' ''\''/opt/my bin/cairn'\'' '\''watch'\'' '\''tmux-4242.3'\'''`)
 	// The popup is modal, so there is nothing to close.
 	_, log = fakeCLIs(t, map[string]string{"tmux": ""})
-	if err := Panel(cairn, "", true); err != nil {
+	if err := Panel(cairn, "", "", true); err != nil {
 		t.Fatal(err)
 	}
 	wantLog(t, log(), "")
@@ -100,7 +107,7 @@ func TestHerdrPanel(t *testing.T) {
 list) echo '{"result":{"panes":[` + tt.panes + `]}}' ;;
 split) echo '{"result":{"pane":{"pane_id":"w1:p9"}}}' ;;
 esac`})
-		if err := Panel(cairn, "", tt.close); err != nil {
+		if err := Panel(cairn, "", "", tt.close); err != nil {
 			t.Fatalf("%s: %v", tt.name, err)
 		}
 		wantLog(t, log(), tt.want...)
@@ -140,7 +147,7 @@ esac`
 		if tt.live {
 			os.WriteFile(filepath.Join(dir, "live"), nil, 0o644)
 		}
-		if err := Panel(cairn, "", tt.close); err != nil {
+		if err := Panel(cairn, "", "", tt.close); err != nil {
 			t.Fatalf("%s: %v", tt.name, err)
 		}
 		wantLog(t, log(), tt.want...)
@@ -172,7 +179,7 @@ func TestOrcaPanel(t *testing.T) {
 list) echo '{"result":{"terminals":[` + tt.terminals + `]}}' ;;
 split) echo '{"result":{"split":{"handle":"term_9","tabId":"tab1","paneRuntimeId":1,"leafId":"l9"}}}' ;;
 esac`})
-		if err := Panel(cairn, "", tt.close); err != nil {
+		if err := Panel(cairn, "", "", tt.close); err != nil {
 			t.Fatalf("%s: %v", tt.name, err)
 		}
 		wantLog(t, log(), tt.want...)
@@ -184,7 +191,7 @@ func TestPanelError(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("ORCA_TERMINAL_HANDLE", "term_1")
 	fakeCLIs(t, map[string]string{"orca": "echo 'not running\nstart orca' >&2; exit 1"})
-	err := Panel(cairn, "", false)
+	err := Panel(cairn, "", "", false)
 	if err == nil || err.Error() != "orca terminal: not running" {
 		t.Errorf("Panel = %v", err)
 	}
@@ -202,13 +209,13 @@ func TestPanelForKey(t *testing.T) {
 	}
 	for _, tt := range tests {
 		_, log := fakeCLIs(t, map[string]string{"rex": "", "tmux": "", "herdr": "", "hc": "", "orca": ""})
-		Panel(cairn, tt.key, false)
+		Panel(cairn, tt.key, "", false)
 		if got := log()[0]; got != tt.want {
 			t.Errorf("Panel(%q) ran %q", tt.key, got)
 		}
 	}
 	for _, key := range []string{"tmux-4242", "herdr-w1-p1"} {
-		if err := Panel(cairn, key, false); err == nil || !strings.Contains(err.Error(), "no pane in") {
+		if err := Panel(cairn, key, "", false); err == nil || !strings.Contains(err.Error(), "no pane in") {
 			t.Errorf("Panel(%q) = %v", key, err)
 		}
 	}

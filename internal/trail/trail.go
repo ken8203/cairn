@@ -7,7 +7,7 @@
 //
 //	## Notes
 //
-//	- 11-02 free text
+//	- 2026-11-02 free text
 package trail
 
 import (
@@ -29,7 +29,7 @@ var (
 	refPattern  = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+`)
 	urlPattern  = regexp.MustCompile(`https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[0-9]+`)
 	stepLine    = regexp.MustCompile(`^- \[([ xX])\] (.*)$`)
-	datedNote   = regexp.MustCompile(`^[0-9]{2}-[0-9]{2}( |$)`)
+	datedNote   = regexp.MustCompile(`^([0-9]{4}-)?[0-9]{2}-[0-9]{2}( |$)`)
 )
 
 // ValidName reports whether s is safe as a trail or file name.
@@ -121,7 +121,12 @@ func (s Store) Create(name string) (bool, error) {
 // lock takes an advisory lock on a sibling of the trail, since the trail itself is
 // replaced on every write.
 func (s Store) lock(name string) (unlock func(), err error) {
-	f, err := os.OpenFile(filepath.Join(s.Dir, "."+name+".lock"), os.O_RDWR|os.O_CREATE, 0o644)
+	return Lock(filepath.Join(s.Dir, "."+name+".lock"))
+}
+
+// Lock takes an exclusive advisory lock on file, creating it if needed.
+func Lock(file string) (unlock func(), err error) {
+	f, err := os.OpenFile(file, os.O_RDWR|os.O_CREATE, 0o644)
 	if err != nil {
 		return nil, err
 	}
@@ -324,11 +329,12 @@ func (s Store) Link(name string, target int, ref string) error {
 	})
 }
 
-// Note appends a dated note; a date the text already starts with is kept.
+// Note appends a note dated YYYY-MM-DD; a date the text already starts with, including
+// the MM-DD of older notes, is kept.
 func (s Store) Note(name, text string) error {
 	text = Clean(text)
 	if !datedNote.MatchString(text) {
-		text = time.Now().Format("01-02") + " " + text
+		text = time.Now().Format(time.DateOnly) + " " + text
 	}
 	unlock, err := s.lock(name)
 	if err != nil {

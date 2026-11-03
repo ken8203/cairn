@@ -42,8 +42,9 @@ func TestRecords(t *testing.T) {
 		command, output string
 		want            []string
 	}{
-		{"gh pr create --fill", created, []string{"--own https://github.com/o/r/pull/5"}},
-		{"cd x && gh pr create --title 'a b' --body \"$(cat f)\"", created, []string{"--own https://github.com/o/r/pull/5"}},
+		{"gh pr create --fill", created, []string{"--own -C /abs https://github.com/o/r/pull/5"}},
+		{"cd x && gh pr create --title 'a b' --body \"$(cat f)\"", created, []string{"--own -C /abs/x https://github.com/o/r/pull/5"}},
+		{"cd $X && gh pr create --fill", created, []string{"--own https://github.com/o/r/pull/5"}},
 		{"gh pr create --fill", "aborted", nil},
 		{"git push -u origin HEAD", "", []string{"--own -C /abs"}},
 		{"cd sub && git push", "", []string{"--own -C /abs/sub"}},
