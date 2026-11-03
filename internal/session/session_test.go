@@ -3,6 +3,7 @@ package session
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -109,11 +110,11 @@ func TestNotePaneExpires(t *testing.T) {
 
 func TestSessionFile(t *testing.T) {
 	s := newStore(t)
-	if err := s.Record("s1", "https://github.com/o/r/pull/1", false, ""); err != nil {
+	if err := s.Record("s1", "https://github.com/o/r/pull/1", false, "", Place{}); err != nil {
 		t.Fatal(err)
 	}
 	b, _ := os.ReadFile(s.sessionFile("s1"))
-	if !regexp.MustCompile(`^\{"trail":null,"prs":\["https://github.com/o/r/pull/1"\],"updated":"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}(Z|[+-][0-9:]{5})"\}\n$`).Match(b) {
+	if !regexp.MustCompile(`^\{"trail":null,"prs":\["https://github.com/o/r/pull/1"\],"places":\[\],"updated":"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}(Z|[+-][0-9:]{5})"\}\n$`).Match(b) {
 		t.Errorf("file = %s", b)
 	}
 	if err := s.Bind("s1", "t"); err != nil {
@@ -134,7 +135,7 @@ func TestSessionConcurrentWrites(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := range n {
 		wg.Go(func() {
-			if err := s.Record("s1", fmt.Sprintf("https://github.com/o/r/pull/%d", i), false, ""); err != nil {
+			if err := s.Record("s1", fmt.Sprintf("https://github.com/o/r/pull/%d", i), false, "", Place{}); err != nil {
 				t.Error(err)
 			}
 		})
@@ -171,5 +172,87 @@ func TestClaim(t *testing.T) {
 
 	if got, _ := s.claim(key, ""); got != "trail-01234567" {
 		t.Errorf("key name = %q", got)
+	}
+}
+
+// gitRepo is a git repo with an origin remote and a commit on branch, and a worktree of
+// it on a second branch.
+func gitRepo(t *testing.T, origin, branch string) (repo, worktree string) {
+	t.Helper()
+	dir := t.TempDir()
+	repo, worktree = filepath.Join(dir, "repo"), filepath.Join(dir, "wt")
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %q: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "-q", "-b", branch, repo)
+	run("-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init")
+	if origin != "" {
+		run("-C", repo, "remote", "add", "origin", origin)
+	}
+	run("-C", repo, "worktree", "add", "-q", "-b", "wt-branch", worktree)
+	// Temp dirs may sit behind a symlink, which git resolves.
+	repo, _ = filepath.EvalSymlinks(repo)
+	worktree, _ = filepath.EvalSymlinks(worktree)
+	return repo, worktree
+}
+
+func TestWhere(t *testing.T) {
+	repo, wt := gitRepo(t, "git@github.com:o/r.git", "feat/x")
+	os.MkdirAll(filepath.Join(repo, "sub"), 0o755)
+	for dir, want := range map[string]Place{
+		repo:                       {repo, "o/r", "feat/x"},
+		filepath.Join(repo, "sub"): {repo, "o/r", "feat/x"},
+		wt:                         {wt, "o/r", "wt-branch"},
+	} {
+		if got, ok := Where(dir); !ok || got != want {
+			t.Errorf("Where(%q) = %+v, %v", dir, got, ok)
+		}
+	}
+	for _, dir := range []string{t.TempDir(), "", filepath.Join(repo, "missing")} {
+		if got, ok := Where(dir); ok {
+			t.Errorf("Where(%q) = %+v", dir, got)
+		}
+	}
+
+	bare, _ := gitRepo(t, "", "main")
+	if got, _ := Where(bare); got.Repo != "" || got.Branch != "main" {
+		t.Errorf("without origin: %+v", got)
+	}
+}
+
+func TestRemoteRepo(t *testing.T) {
+	for url, want := range map[string]string{
+		"https://github.com/o/r.git":    "o/r",
+		"https://github.com/o/r":        "o/r",
+		"https://github.com/o/r/":       "o/r",
+		"git@github.com:o/r.git":        "o/r",
+		"ssh://git@github.com/o/r.git":  "o/r",
+		"ssh://git@github.com:22/o/r":   "o/r",
+		"https://ghe.example.com/a/o/r": "o/r",
+		"/local/path":                   "",
+		"https://github.com/o":          "",
+		"":                              "",
+	} {
+		if got := remoteRepo(url); got != want {
+			t.Errorf("remoteRepo(%q) = %q, want %q", url, got, want)
+		}
+	}
+}
+
+func TestRecordPlaces(t *testing.T) {
+	s := newStore(t)
+	a, b := Place{"/w/a", "o/r", "x"}, Place{"/w/a", "o/r", "y"}
+	for _, at := range []Place{a, b, a, {}} {
+		if err := s.Record("s1", "https://github.com/o/r/pull/1", false, "", at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := s.load("s1").Places; !slices.Equal(got, []Place{a, b}) {
+		t.Errorf("places = %+v", got)
 	}
 }

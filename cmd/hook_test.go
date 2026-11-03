@@ -109,7 +109,7 @@ func TestHookSpawnsRecord(t *testing.T) {
 		{
 			"Codex pr create",
 			`{"session_id":"01a19fee-0b76","turn_id":"t","cwd":"/abs","hook_event_name":"PostToolUse","model":"m","tool_name":"Bash","tool_input":{"command":"gh pr create --fill"},"tool_response":"https://github.com/o/r/pull/998\n"}`,
-			[]string{"record --session 01a19fee-0b76 --own https://github.com/o/r/pull/998 pane=block:p1"},
+			[]string{"record --session 01a19fee-0b76 --own -C /abs https://github.com/o/r/pull/998 pane=block:p1"},
 		},
 		{
 			"unrelated command",

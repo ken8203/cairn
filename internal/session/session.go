@@ -4,10 +4,12 @@ package session
 
 import (
 	"cmp"
+	"context"
 	json "encoding/json/v2"
 	"fmt"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -43,11 +45,66 @@ type Store struct {
 	Label func() string
 }
 
-// state is a session's file: the trail it is on and the PRs it touched.
+// state is a session's file: the trail it is on, the PRs it touched and the places it
+// recorded them from.
 type state struct {
 	Trail   *string   `json:"trail"`
 	PRs     []string  `json:"prs"`
+	Places  []Place   `json:"places"`
 	Updated time.Time `json:"updated"`
+}
+
+// Place is where a PR was recorded from: a git worktree's toplevel, the owner/repo of its
+// origin remote, and its branch, empty on a detached HEAD.
+type Place struct {
+	Dir    string `json:"dir"`
+	Repo   string `json:"repo"`
+	Branch string `json:"branch"`
+}
+
+const gitTimeout = 2 * time.Second
+
+// Where is the place dir is in, or false outside a git worktree.
+func Where(dir string) (Place, bool) {
+	if dir == "" {
+		return Place{}, false
+	}
+	top, branch, ok := strings.Cut(git(dir, "rev-parse", "--show-toplevel", "--abbrev-ref", "HEAD"), "\n")
+	if !ok || top == "" {
+		return Place{}, false
+	}
+	if branch == "HEAD" {
+		branch = ""
+	}
+	return Place{Dir: top, Repo: remoteRepo(git(dir, "remote", "get-url", "origin")), Branch: branch}, true
+}
+
+// git is what git prints in dir, trimmed, or empty when it fails or takes too long.
+func git(dir string, args ...string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// remoteRepo is the owner/repo a remote URL ends in: https://host/o/r.git,
+// ssh://git@host/o/r or git@host:o/r.git.
+func remoteRepo(url string) string {
+	if _, rest, ok := strings.Cut(url, "://"); ok {
+		_, url, _ = strings.Cut(rest, "/")
+	} else if _, path, ok := strings.Cut(url, ":"); ok {
+		url = path
+	} else {
+		return ""
+	}
+	parts := strings.Split(strings.TrimSuffix(strings.TrimSuffix(url, "/"), ".git"), "/")
+	if len(parts) < 2 || parts[len(parts)-2] == "" || parts[len(parts)-1] == "" {
+		return ""
+	}
+	return parts[len(parts)-2] + "/" + parts[len(parts)-1]
 }
 
 func (s Store) sessionsDir() string { return filepath.Join(s.Dir, "sessions") }
@@ -158,14 +215,18 @@ func (s Store) pointers() []string {
 	return slices.DeleteFunc(files, func(f string) bool { return strings.HasPrefix(filepath.Base(f), ".") })
 }
 
-// Record remembers a PR, one GitHub knows, for the session. A PR the session's agent
+// Record remembers a PR, one GitHub knows, for the session, and the place it was
+// recorded from unless that is zero. A PR the session's agent
 // authored (own) joins its trail ahead of the first unfinished free-text step, starting a
 // trail if the session has none, named after head (the PR's branch) when the pane's host
 // gives no label; being on another trail never joins the session to it.
-func (s Store) Record(key, url string, own bool, head string) error {
+func (s Store) Record(key, url string, own bool, head string, at Place) error {
 	err := s.update(key, func(st *state) {
 		if !slices.Contains(st.PRs, url) {
 			st.PRs = append(st.PRs, url)
+		}
+		if at != (Place{}) && !slices.Contains(st.Places, at) {
+			st.Places = append(st.Places, at)
 		}
 	})
 	if err != nil {

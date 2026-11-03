@@ -59,7 +59,7 @@ func readTrail(t *testing.T, a App, name string) string {
 func touch(t *testing.T, a App, key string, urls ...string) {
 	t.Helper()
 	for _, u := range urls {
-		if err := a.Sessions.Record(key, u, false, ""); err != nil {
+		if err := a.Sessions.Record(key, u, false, "", session.Place{}); err != nil {
 			t.Fatal(err)
 		}
 	}

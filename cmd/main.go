@@ -376,7 +376,8 @@ func record(app ui.App, key string, o recordOpts) error {
 	if !ok {
 		return nil
 	}
-	return app.Sessions.Record(key, url, o.own, p.Head)
+	at, _ := session.Where(o.dir)
+	return app.Sessions.Record(key, url, o.own, p.Head, at)
 }
 
 // runHook handles a Claude Code or Codex hook payload. It never fails the agent: errors

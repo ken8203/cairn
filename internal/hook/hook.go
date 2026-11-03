@@ -158,7 +158,14 @@ func (w *walker) call(c *syntax.CallExpr, dir string) string {
 		}
 		switch args[2] {
 		case "create", "new":
-			if urls := urlPattern.FindAllString(w.payload.Output(), -1); len(urls) > 0 {
+			urls := urlPattern.FindAllString(w.payload.Output(), -1)
+			if len(urls) == 0 {
+				break
+			}
+			// The dir only tells record where the PR was opened from.
+			if dir != "" {
+				w.add("--own", "-C", dir, urls[len(urls)-1])
+			} else {
 				w.add("--own", urls[len(urls)-1])
 			}
 		case "checkout", "co", "comment", "review", "edit", "merge", "ready", "close", "reopen", "update-branch":
