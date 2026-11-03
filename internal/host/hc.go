@@ -16,7 +16,7 @@ var hc = host{
 	name:   "Herdr.app",
 	prefix: "hc",
 	env:    "HC_TERMINAL_ID",
-	tab:    func() string { return "" },
+	tab:    func() string { return named(hcTab(hcGet(os.Getenv("HC_TERMINAL_ID")).Labels.Where)) },
 	key: func(addr string) string {
 		scope := Sanitize(os.Getenv("HC_SCOPE"))
 		if scope == "" {
@@ -59,6 +59,12 @@ func hcAddr(body string) string {
 func hcSpace(where string) string {
 	space, _, _ := strings.Cut(where, " / ")
 	return strings.TrimSpace(space)
+}
+
+// hcTab is the tab in a terminal's where label; one nobody renamed is its number.
+func hcTab(where string) string {
+	_, tab, _ := strings.Cut(where, " / ")
+	return strings.TrimSpace(tab)
 }
 
 // hcPanelLabels are the labels Herdr.app places a terminal by: a terminal that carries

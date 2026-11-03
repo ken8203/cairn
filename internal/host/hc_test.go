@@ -32,6 +32,22 @@ func TestHcSpace(t *testing.T) {
 	}
 }
 
+func TestHcTab(t *testing.T) {
+	for where, want := range map[string]string{
+		"dotfiles / 1":           "",
+		"dotfiles / checkout v2": "checkout v2",
+		"solo":                   "",
+	} {
+		clearEnv(t)
+		t.Setenv("HC_TERMINAL_ID", "t3")
+		t.Setenv("HC_SCOPE", hcScope)
+		fakeCLIs(t, map[string]string{"hc": `echo '{"labels":{"where":"` + where + `"}}'`})
+		if got := Tab(); got != want {
+			t.Errorf("where %q: Tab = %q, want %q", where, got, want)
+		}
+	}
+}
+
 func TestHcPanel(t *testing.T) {
 	const fake = `case "$1 $2" in
 "get cairn-t3") [ -f live ] && echo '{"state":"live"}' || { echo '{"error":{"kind":"not_found"}}'; exit 3; } ;;
