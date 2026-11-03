@@ -76,12 +76,37 @@ func TestNotePane(t *testing.T) {
 	}
 }
 
+func TestNoteHooked(t *testing.T) {
+	s := newStore(t)
+	if s.Hooked("s1") {
+		t.Fatal("hooked before the hook ran")
+	}
+	expired := time.Now().Add(-stateTTL - time.Hour)
+	for _, key := range []string{"old", "s1"} {
+		if err := s.NoteHooked(key); err != nil {
+			t.Fatal(err)
+		}
+		os.Chtimes(filepath.Join(s.hookedDir(), key), expired, expired)
+	}
+
+	// A session starting again keeps its own marker alive, and a new session's marker
+	// sweeps out the expired ones.
+	for _, key := range []string{"s1", "s2"} {
+		if err := s.NoteHooked(key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if s.Hooked("old") || !s.Hooked("s1") || !s.Hooked("s2") {
+		t.Errorf("old %v, s1 %v, s2 %v", s.Hooked("old"), s.Hooked("s1"), s.Hooked("s2"))
+	}
+}
+
 func TestNotePaneExpires(t *testing.T) {
 	s := newStore(t)
 	for _, p := range []string{"old", "kept", "recent"} {
 		s.NotePane("s1", p)
 	}
-	expired := time.Now().Add(-paneTTL - time.Hour)
+	expired := time.Now().Add(-stateTTL - time.Hour)
 	os.Chtimes(s.pointerFile("old"), expired, expired)
 	os.Chtimes(s.pointerFile("kept"), expired, expired)
 

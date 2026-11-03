@@ -70,7 +70,7 @@ const ttl = 60 * time.Second
 
 // where is what doctor reports about the terminal and agent session cairn runs in.
 func where(app ui.App) setup.Env {
-	return setup.Env{Host: host.Name, Pane: session.Pane, Agent: session.Agent, Trail: app.Sessions.Trail, Orca: func() string { return orcaDetail(app) }, Home: app.Sessions.Dir}
+	return setup.Env{Host: host.Name, Pane: session.Pane, Agent: session.Agent, Trail: app.Sessions.Trail, Hooked: app.Sessions.Hooked, Orca: func() string { return orcaDetail(app) }, Home: app.Sessions.Dir}
 }
 
 // orcaDetail counts the Orca worktrees on trails, for doctor.
@@ -508,6 +508,7 @@ func runHook(app ui.App, in io.Reader, out io.Writer) {
 			app.Spawn(slices.Concat([]string{"record", "--session", p.SessionID}, args)...)
 		}
 	case "SessionStart":
+		app.Sessions.NoteHooked(p.SessionID)
 		// The pane's panel switches to the new session at once.
 		app.Sessions.NotePane(p.SessionID, session.Pane())
 		if ctx := app.Context(p.SessionID, p.Cwd); ctx != "" {

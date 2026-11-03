@@ -28,7 +28,9 @@ codex plugin marketplace add ken8203/cairn && codex plugin add cairn@cairn
 With herdr on `PATH`, setup also writes cairn's herdr plugin and links it (see
 [Panel](#panel)). Setup prints one `ok|done|skip|manual <step>: <detail>` line per step,
 runs only what's missing, never edits a config file itself, and ends with `cairn doctor`.
-`cairn setup --dry-run` shows what it would run.
+`cairn setup --dry-run` shows what it would run. Agents load a plugin's hooks only when a
+session starts, so after installing or enabling the plugin in an agent setup prints
+`manual <agent>-restart: restart running <Agent> sessions to load cairn's hooks`.
 
 `cairn doctor` prints `ok|warn|fail <check>: <detail>` lines, or with `--json` an array of
 `{check,status,detail,fix}`: whether `cairn` on `PATH` is this binary, `gh` is logged in,
@@ -36,8 +38,10 @@ runs only what's missing, never edits a config file itself, and ends with `cairn
 trusted in `$CODEX_HOME/config.toml`, and, with herdr installed, cairn's herdr plugin
 linked to this binary (a `warn` otherwise), then the terminal host, pane and agent
 session. Untrusted or disabled Codex hooks are a `warn`, since setup can't trust them for
-you. Last, an `orca` line counts the Orca worktrees on trails, or says Orca isn't
-installed.
+you. In an agent session that never ran cairn's `SessionStart` hook (no `hooked/<session>`
+marker, see [State](#state)), as one started before the plugin was installed, the
+`session` check is a `warn` whose fix is to restart that session. Last, an `orca` line
+counts the Orca worktrees on trails, or says Orca isn't installed.
 
 `cairn skills get` prints guides built into the binary, so an agent reads the one that
 matches the cairn it runs. The plugin's `cairn` skill only points the agent there.
@@ -101,6 +105,7 @@ All of cairn's state lives in `${CAIRN_HOME:-~/.cairn}`:
   trails/<name>.md                     the trails
   sessions/<key>.json                  each session's trail, PRs and places
   panes/<pane-key>                     the last agent session that ran cairn in a pane
+  hooked/<session>                     empty: this agent session ran cairn's SessionStart hook
   cache/prs/<owner>/<repo>/<n>.json    PR state from GitHub
   herdr-plugin/herdr-plugin.toml       cairn's herdr plugin, written by setup
 ```
@@ -119,8 +124,8 @@ remote, and the branch. Session files are written under a lock and replaced atom
 so a hook's record and an agent's `cairn use` don't lose each other's change.
 
 A pane's file holds one session id; it is what that pane's panel shows. Pointers
-untouched for 30 days are removed whenever another is written. PR state is cached for 60
-seconds, shared by every cairn process.
+untouched for 30 days are removed whenever another is written, and so are hook markers.
+PR state is cached for 60 seconds, shared by every cairn process.
 
 ## Folders
 

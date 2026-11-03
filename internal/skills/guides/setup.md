@@ -39,6 +39,10 @@ What it does:
    line is the keybinding the user adds to `~/.config/herdr/config.toml` to toggle the
    panel; pass it on, since setup never edits that file.
 
+Agents load a plugin's hooks only when a session starts. After installing or enabling the
+plugin in an agent, setup prints `manual claude-restart` or `manual codex-restart`: tell
+the user to restart running sessions of that agent, this one included.
+
 It never edits agent settings or dotfiles itself.
 
 ## Doctor
@@ -54,7 +58,8 @@ user can trust them, so pass the fix on to them.
 
 - **PRs aren't recorded.** Run `cairn doctor`. The plugin must be installed and enabled
   in the agent, and in Codex its hooks trusted. Hooks load when a session starts, so
-  restart the agent after installing.
+  restart the agent after installing: a `warn session` line saying cairn's hook hasn't
+  run means this session started without them.
 - **`path` fails.** Add the directory doctor names to `PATH` in the shell profile, or
   rerun `make install`.
 - **`gh` fails.** Install the GitHub CLI and run `gh auth login`.

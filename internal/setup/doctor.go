@@ -58,6 +58,8 @@ func (c Check) String() string {
 type Env struct {
 	Host, Pane, Agent func() string
 	Trail             func(session string) string
+	// Hooked says whether the agent session ran cairn's hook, which it loads only at start.
+	Hooked func(session string) bool
 	// Orca says how many Orca worktrees are on trails, or that Orca isn't installed.
 	Orca func() string
 	// Home is cairn's state folder, where setup writes herdr's plugin.
@@ -72,7 +74,7 @@ type plugin struct {
 
 // agent is a coding agent cairn's plugin installs into, driven through its CLI.
 type agent struct {
-	name                    string
+	name, title             string
 	listMarketplaces        []string
 	marketplaces            func(out []byte) ([]string, error)
 	listPlugins             []string
@@ -88,6 +90,7 @@ type agent struct {
 var agents = []agent{
 	{
 		name:             "claude",
+		title:            "Claude Code",
 		listMarketplaces: []string{"claude", "plugin", "marketplace", "list", "--json"},
 		marketplaces: func(out []byte) ([]string, error) {
 			var list []struct {
@@ -120,6 +123,7 @@ var agents = []agent{
 	},
 	{
 		name:             "codex",
+		title:            "Codex",
 		listMarketplaces: []string{"codex", "plugin", "marketplace", "list", "--json"},
 		marketplaces: func(out []byte) ([]string, error) {
 			var list struct {
@@ -263,6 +267,10 @@ func (p probe) checks(env Env) []Check {
 		s.Detail = id + ", no trail yet"
 		if name := env.Trail(id); name != "" {
 			s.Detail = id + ", on trail " + name
+		}
+		if !env.Hooked(id) {
+			s.Status, s.Fix = Warn, "restart this agent session to load cairn's hooks"
+			s.Detail += "; cairn's hook hasn't run in this session"
 		}
 	}
 	return append(cs, h, s, Check{Check: "orca", Status: OK, Detail: env.Orca()})

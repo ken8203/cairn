@@ -97,11 +97,12 @@ func touch(t *testing.T, dir, name, content string) {
 
 // nowhere is an Env outside any host or agent session.
 var nowhere = Env{
-	Host:  func() string { return "" },
-	Pane:  func() string { return "" },
-	Agent: func() string { return "" },
-	Trail: func(string) string { return "" },
-	Orca:  func() string { return "not installed" },
+	Host:   func() string { return "" },
+	Pane:   func() string { return "" },
+	Agent:  func() string { return "" },
+	Trail:  func(string) string { return "" },
+	Hooked: func(string) bool { return false },
+	Orca:   func() string { return "not installed" },
 }
 
 func agentCheck(name string) Check {
@@ -152,15 +153,25 @@ func TestDoctorPlugins(t *testing.T) {
 func TestDoctorWhere(t *testing.T) {
 	fakes(t)
 	env := Env{
-		Host:  func() string { return "Rex" },
-		Pane:  func() string { return "p1" },
-		Agent: func() string { return "s1" },
-		Trail: func(id string) string { return "t-" + id },
-		Orca:  func() string { return "2 worktrees on cairn trails" },
+		Host:   func() string { return "Rex" },
+		Pane:   func() string { return "p1" },
+		Agent:  func() string { return "s1" },
+		Trail:  func(id string) string { return "t-" + id },
+		Hooked: func(string) bool { return true },
+		Orca:   func() string { return "2 worktrees on cairn trails" },
 	}
 	cs := Doctor(env)
 	if got := cs[len(cs)-3:]; got[0].String() != "ok host: Rex, pane p1" || got[1].String() != "ok session: s1, on trail t-s1" || got[2].String() != "ok orca: 2 worktrees on cairn trails" {
 		t.Errorf("got %v", got)
+	}
+	env.Trail = func(string) string { return "" }
+	if got := Doctor(env); got[len(got)-2].String() != "ok session: s1, no trail yet" {
+		t.Errorf("no trail: %v", got[len(got)-2])
+	}
+	// A session started before cairn's plugin was installed never ran its hook.
+	env.Hooked = func(string) bool { return false }
+	if got := Doctor(env); got[len(got)-2].String() != "warn session: s1, no trail yet; cairn's hook hasn't run in this session; fix: restart this agent session to load cairn's hooks" {
+		t.Errorf("not hooked: %v", got[len(got)-2])
 	}
 	cs = Doctor(nowhere)
 	if got := cs[len(cs)-3:]; got[0].String() != "ok host: no terminal host with panes" || got[1].String() != "ok session: not in an agent session" || got[2].String() != "ok orca: not installed" {
