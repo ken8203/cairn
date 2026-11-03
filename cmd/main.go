@@ -31,7 +31,7 @@ const help = `Where each chain of work stands. A trail is an ordered checklist o
 steps (releases, flags, rollouts) that belongs to an agent session, and to any other
 session that joins it. cairn's agent hook records the PRs each session touches.
 
-  cairn [show] [--json]      this session's trail and the PRs it touched
+  cairn [show] [--json] [--dir <path>]   this session's trail, else this folder's, and the PRs it touched
   cairn ls                   every trail with its progress and next step
   cairn use <name>           attach this session to a trail, creating it if needed
   cairn add <step>...        append steps: owner/repo#n, a PR URL, or free text
@@ -39,7 +39,7 @@ session that joins it. cairn's agent hook records the PRs each session touches.
   cairn done <n>             tick (or untick) free-text step n
   cairn note <text>          append a note
   cairn edit [name]          open a trail in $EDITOR
-  cairn watch [pane]         keep a pane's view on screen (the panel)
+  cairn watch [pane] [--dir <path>]   keep a pane's view on screen (the panel)
   cairn panel [--close] [pane]   open or close a pane's panel in the terminal it runs in
   cairn statusline           Claude Code statusline segment
   cairn setup [--dry-run]    install cairn's plugin in Claude Code and Codex, then run doctor
@@ -101,25 +101,38 @@ func run(app ui.App, args []string) error {
 		}
 		return sessions.NotePane(agent, pane())
 	}
-	// trailOr is this session's trail, or the error to give without one.
-	trailOr := func(missing string) (string, error) {
+	// dir is the folder whose trail a view falls back to: --dir, else the cwd.
+	dir := func() string {
+		if i := slices.Index(args, "--dir"); i >= 0 && i+1 < len(args) {
+			return args[i+1]
+		}
+		wd, _ := os.Getwd()
+		return wd
+	}
+	// trailOr is this session's own trail, or an error naming the folder's trail to join.
+	trailOr := func() (string, error) {
 		if err := enter(agent); err != nil {
 			return "", err
 		}
 		if name := sessions.Trail(key()); name != "" {
 			return name, nil
 		}
-		return "", errors.New(missing)
+		if name, at := sessions.ResolveDir(dir(), app.Head); name != "" {
+			return "", fmt.Errorf("this session has no trail; this folder's branch %s is on trail %s, run `cairn use %s` to join it", at.Branch, name, name)
+		}
+		return "", errors.New("this session has no trail; run `cairn use <name>` first")
 	}
 
 	switch arg(0) {
-	case "", "show", "--json":
-		if err := enter(agent); err != nil {
+	case "", "show", "--json", "--dir":
+		// Outside a session, as in a plain terminal, the folder's trail still shows.
+		err := enter(agent)
+		found := app.Find(agent, pane(), dir())
+		if err != nil && found.Trail == "" {
 			return err
 		}
 		if slices.Contains(args, "--json") {
-			// Without the agent's session id, the pane shows the session last run there.
-			b, err := json.Marshal(app.Data(cmp.Or(agent, sessions.PaneSession(pane()))))
+			b, err := json.Marshal(app.Data(found))
 			if err != nil {
 				return err
 			}
@@ -130,7 +143,7 @@ func run(app ui.App, args []string) error {
 		if term.IsTerminal(os.Stdout.Fd()) {
 			width = termWidth()
 		}
-		for _, l := range app.Show(key(), width) {
+		for _, l := range app.Show(found, width) {
 			fmt.Println(l)
 		}
 	case "ls":
@@ -144,7 +157,7 @@ func run(app ui.App, args []string) error {
 		}
 		return sessions.Bind(key(), arg(1))
 	case "add":
-		name, err := trailOr("this session has no trail; run `cairn use <name>` first")
+		name, err := trailOr()
 		if err != nil {
 			return err
 		}
@@ -153,7 +166,7 @@ func run(app ui.App, args []string) error {
 		}
 		return add(app, name, args[1:])
 	case "link":
-		name, err := trailOr("this session has no trail")
+		name, err := trailOr()
 		if err != nil {
 			return err
 		}
@@ -167,7 +180,7 @@ func run(app ui.App, args []string) error {
 		}
 		return trails.Link(name, n, ref)
 	case "done":
-		name, err := trailOr("this session has no trail")
+		name, err := trailOr()
 		if err != nil {
 			return err
 		}
@@ -177,7 +190,7 @@ func run(app ui.App, args []string) error {
 		}
 		return trails.Tick(name, n)
 	case "note":
-		name, err := trailOr("this session has no trail")
+		name, err := trailOr()
 		if err != nil {
 			return err
 		}
@@ -203,14 +216,19 @@ func run(app ui.App, args []string) error {
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 		return cmd.Run()
 	case "watch":
-		target := host.Key(arg(1))
-		if target == "" {
-			target = pane()
+		var target string
+		for i := 1; i < len(args); i++ {
+			if args[i] == "--dir" {
+				i++
+			} else {
+				target = host.Key(args[i])
+			}
 		}
+		target = cmp.Or(target, pane())
 		if target == "" {
-			return errors.New("usage: cairn watch <pane>")
+			return errors.New("usage: cairn watch [pane] [--dir <path>]")
 		}
-		return app.Watch(target)
+		return app.Watch(target, dir())
 	case "panel":
 		self, err := os.Executable()
 		if err != nil {
@@ -222,7 +240,8 @@ func run(app ui.App, args []string) error {
 				target = host.Key(a)
 			}
 		}
-		err = host.Panel(self, target, slices.Contains(args[1:], "--close"))
+		wd, _ := os.Getwd()
+		err = host.Panel(self, target, wd, slices.Contains(args[1:], "--close"))
 		if errors.Is(err, host.ErrNoPanel) {
 			fmt.Println("cairn panel:", err)
 			return nil
@@ -235,8 +254,7 @@ func run(app ui.App, args []string) error {
 		if err := enter(agent); err != nil {
 			return err
 		}
-		// Without the agent's session id, the pane shows the session last run there.
-		fmt.Print(app.Statusline(cmp.Or(agent, sessions.PaneSession(pane()))))
+		fmt.Print(app.Statusline(app.Find(agent, pane(), dir())))
 	case "record":
 		o := recordArgs(args[1:])
 		if o.session != "" && !trail.ValidName(o.session) {

@@ -83,7 +83,7 @@ func TestStatuslineFollowsPaneSession(t *testing.T) {
 	writeTrail(t, a, "b", "# b\n\n- [ ] beta\n")
 	a.Sessions.Bind("s2", "b")
 	a.Sessions.NotePane("s2", "p1")
-	if got := a.Statusline(a.Sessions.PaneSession("p1")); got != "b 0/1 · ▶ beta" {
+	if got := a.Statusline(a.Find("", "p1", "")); got != "b 0/1 · ▶ beta" {
 		t.Errorf("statusline = %q", got)
 	}
 }
@@ -144,7 +144,7 @@ func TestRenderWideTitles(t *testing.T) {
 	writeTrail(t, a, "t", "# t\n\n- [ ] o/r#1\n")
 	a.Sessions.Bind("s1", "t")
 	const width = 60
-	line := render(a.gather("s1", false), width).lines[2]
+	line := render(a.gather(a.Find("s1", "", ""), false), width).lines[2]
 	if w := ansi.StringWidth(line); w > width || !strings.HasSuffix(line, "…") {
 		t.Errorf("%d columns: %q", w, line)
 	}
@@ -169,7 +169,7 @@ func TestData(t *testing.T) {
 	writeTrail(t, a, "t", "# t\n\n- [ ] o/r#1\n- [ ] o/r#2\n- [x] release\n- [ ] flag\n\n## Notes\n\n- 11-02 waiting\n")
 	a.Sessions.Bind("s1", "t")
 	touch(t, a, "s1", stacked, other)
-	b, err := json.Marshal(a.Data("s1"))
+	b, err := json.Marshal(a.Data(a.Find("s1", "", "")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestData(t *testing.T) {
 		`{"n":2,"kind":"pr","done":false,"ref":"o/r#2","url":"` + stacked + `","title":"Use API","state":"draft","ci":"pending","stacked_on":"o/r#1"},` +
 		`{"n":3,"kind":"text","text":"release","done":true},` +
 		`{"n":4,"kind":"text","text":"flag","done":false}],` +
-		`"notes":["11-02 waiting"]},` +
+		`"notes":["11-02 waiting"]},"via":"session",` +
 		`"prs":[{"ref":"o/s#3","url":"` + other + `","title":"Side fix","state":"open","ci":"fail"}]}`
 	if string(b) != want {
 		t.Errorf("got\n%s\nwant\n%s", b, want)
@@ -190,15 +190,33 @@ func TestData(t *testing.T) {
 	// Without a trail: null, and the touched PRs, refreshing the one never fetched in the
 	// background.
 	touch(t, a, "s2", unknown)
-	b, _ = json.Marshal(a.Data("s2"))
+	b, _ = json.Marshal(a.Data(a.Find("s2", "", "")))
 	if want := `{"trail":null,"prs":[{"ref":"o/s#4","url":"` + unknown + `","state":"unknown","ci":"none"}]}`; string(b) != want {
 		t.Errorf("got %s", b)
 	}
 	if len(spawned) == 0 || spawned[0] != "__refresh" {
 		t.Errorf("spawned %q", spawned)
 	}
-	b, _ = json.Marshal(a.Data("s3"))
+	b, _ = json.Marshal(a.Data(a.Find("s3", "", "")))
 	if string(b) != `{"trail":null,"prs":[]}` {
 		t.Errorf("got %s", b)
+	}
+}
+
+func TestShowFoundByFolder(t *testing.T) {
+	a := newApp(t, nil)
+	writeTrail(t, a, "t", "# t\n\n- [ ] x\n")
+	f := session.Found{Key: "s1", Trail: "t", Via: "dir", Place: session.Place{Dir: "/w/cairn", Repo: "o/cairn", Branch: "feat/x"}}
+	got := a.Show(f, 0)
+	if len(got) < 3 || got[1] != dim("found by folder: cairn on feat/x — `cairn use t` to join") || got[2] != "" {
+		t.Errorf("show:\n%s", strings.Join(got, "\n"))
+	}
+	b, _ := json.Marshal(a.Data(f))
+	if !strings.Contains(string(b), `"via":"dir"`) {
+		t.Errorf("data = %s", b)
+	}
+	f.Via = "session"
+	if got := a.Show(f, 0); got[1] != "" {
+		t.Errorf("own trail says %q", got[1])
 	}
 }

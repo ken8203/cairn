@@ -23,10 +23,11 @@ const panelTitle = "cairn"
 
 const cliTimeout = 10 * time.Second
 
-// Panel toggles the trail panel, `cairn watch <key>`, beside the pane a key names, or the
-// current pane without one, or with close only closes it. cairn is the absolute path of
-// this binary.
-func Panel(cairn, key string, close bool) error {
+// Panel toggles the trail panel, `cairn watch <key> --dir <dir>`, beside the pane a key
+// names, or the current pane without one, or with close only closes it. cairn is the
+// absolute path of this binary, and dir the folder whose trail shows when the pane's
+// session has none.
+func Panel(cairn, key, dir string, close bool) error {
 	if key == "" {
 		if h, _ := current(); h.panel == nil {
 			return ErrNoPanel
@@ -36,7 +37,11 @@ func Panel(cairn, key string, close bool) error {
 		}
 	}
 	h, body := lookup(hosts, key)
-	return h.panel(body, []string{cairn, "watch", key}, close)
+	watch := []string{cairn, "watch", key}
+	if dir != "" {
+		watch = append(watch, "--dir", dir)
+	}
+	return h.panel(body, watch, close)
 }
 
 // errNoPane is a panel's error for a key that names no pane in its host.

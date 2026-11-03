@@ -22,6 +22,7 @@ const keysHelp = "1-9 open PR / tick step · e edit · r refresh · q close"
 type panel struct {
 	app           App
 	target, title string
+	dir           string // the folder whose trail shows when the pane's session has none
 	b             *board // nil until the first refresh
 	v             *view
 	clock         string
@@ -40,9 +41,10 @@ type (
 	editedMsg struct{}
 )
 
-// Watch runs the panel for a pane until it is closed.
-func (a App) Watch(pane string) error {
-	m := &panel{app: a, target: pane, title: trail.Clean(a.Title(pane)), v: &view{}}
+// Watch runs the panel for a pane until it is closed, falling back to the trail of the
+// folder dir.
+func (a App) Watch(pane, dir string) error {
+	m := &panel{app: a, target: pane, dir: dir, title: trail.Clean(a.Title(pane)), v: &view{}}
 	_, err := tea.NewProgram(m).Run()
 	fmt.Print(altScrollOff)
 	return cmp.Or(err, m.err)
@@ -59,10 +61,10 @@ func (m *panel) Init() tea.Cmd { return tea.Batch(tea.Raw(altScrollOn), m.refres
 
 func (m *panel) refresh(force bool) tea.Cmd {
 	m.gen++
-	gen, target, a := m.gen, m.target, m.app
+	gen, target, dir, a := m.gen, m.target, m.dir, m.app
 	return func() tea.Msg {
 		// The pane follows whichever session last ran there.
-		return refreshedMsg{gen, a.gather(a.Sessions.PaneSession(target), force)}
+		return refreshedMsg{gen, a.gather(a.Find("", target, dir), force)}
 	}
 }
 

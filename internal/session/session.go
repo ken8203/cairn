@@ -215,6 +215,94 @@ func (s Store) pointers() []string {
 	return slices.DeleteFunc(files, func(f string) bool { return strings.HasPrefix(filepath.Base(f), ".") })
 }
 
+// Found is the trail a view shows, how it was found, and the session whose own PRs show
+// beside it.
+type Found struct {
+	Key   string
+	Trail string
+	// Via is session, pane or dir, and empty without a trail.
+	Via string
+	// Place is the folder's, when the trail was found through it.
+	Place Place
+}
+
+// Find is what a view shows for the agent's session, else the pane's: its own trail,
+// else that of the session the pane last ran, else that of the folder dir. Without the
+// agent's id, as a panel or statusline may run, the pane's last session comes first. The
+// folder only shows a trail; joining it takes `cairn use`. head is a PR's cached head
+// branch.
+func (s Store) Find(agent, pane, dir string, head func(url string) string) Found {
+	own, last := cmp.Or(agent, pane), ""
+	if pane != "" {
+		last = s.PaneSession(pane)
+	}
+	keys := []string{agent, last}
+	if agent == "" {
+		keys = []string{last, pane}
+	}
+	keys = slices.DeleteFunc(slices.Compact(keys), func(k string) bool { return k == "" })
+	for _, key := range keys {
+		if t := s.Trail(key); t != "" {
+			if key == own {
+				return Found{Key: key, Trail: t, Via: "session"}
+			}
+			return Found{Key: key, Trail: t, Via: "pane"}
+		}
+	}
+	var f Found
+	if len(keys) > 0 {
+		f.Key = keys[0]
+	}
+	if t, at := s.ResolveDir(dir, head); t != "" {
+		f.Trail, f.Via, f.Place = t, "dir", at
+	}
+	return f
+}
+
+// ResolveDir is the trail of the branch dir is on, or empty: a trail with a PR step in
+// the folder's repo whose head is that branch, else the trail of a session that recorded
+// a PR from the same worktree and branch; the most recently changed trail when several
+// match. head is a PR's cached head branch, empty while GitHub hasn't been asked.
+func (s Store) ResolveDir(dir string, head func(url string) string) (string, Place) {
+	at, ok := Where(dir)
+	if !ok || at.Branch == "" {
+		return "", at
+	}
+	var found []string
+	if at.Repo != "" {
+		for _, name := range s.Trails.Names() {
+			if slices.ContainsFunc(s.Trails.URLs(name), func(url string) bool {
+				repo, _, _ := strings.Cut(trail.Ref(url), "#")
+				return strings.EqualFold(repo, at.Repo) && head(url) == at.Branch
+			}) {
+				found = append(found, name)
+			}
+		}
+	}
+	if len(found) == 0 {
+		for _, st := range s.sessions() {
+			if st.Trail != nil && slices.ContainsFunc(st.Places, func(p Place) bool { return p.Dir == at.Dir && p.Branch == at.Branch }) {
+				found = append(found, *st.Trail)
+			}
+		}
+	}
+	return s.newest(found), at
+}
+
+// newest is the trail among names changed last, the first by name on a tie; one without
+// a file is left out.
+func (s Store) newest(names []string) string {
+	slices.Sort(names)
+	var best string
+	var at time.Time
+	for _, name := range slices.Compact(names) {
+		if fi, err := os.Stat(s.Trails.File(name)); err == nil && (best == "" || fi.ModTime().After(at)) {
+			best, at = name, fi.ModTime()
+		}
+	}
+	return best
+}
+
 // Record remembers a PR, one GitHub knows, for the session, and the place it was
 // recorded from unless that is zero. A PR the session's agent
 // authored (own) joins its trail ahead of the first unfinished free-text step, starting a

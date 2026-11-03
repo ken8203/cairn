@@ -1,6 +1,7 @@
 package main
 
 import (
+	json "encoding/json/v2"
 	"errors"
 	"io"
 	"os"
@@ -304,7 +305,7 @@ func cairnEnv(t *testing.T, env ...string) []string {
 	dir := t.TempDir()
 	base := slices.DeleteFunc(os.Environ(), func(kv string) bool {
 		k, _, _ := strings.Cut(kv, "=")
-		return slices.Contains([]string{"CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID", "REX_BLOCK", "TMUX_PANE", "HERDR_PANE_ID", "HC_TERMINAL_ID", "ORCA_TERMINAL_HANDLE"}, k)
+		return slices.Contains([]string{"CAIRN_HOME", "CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID", "REX_BLOCK", "TMUX_PANE", "HERDR_PANE_ID", "HC_TERMINAL_ID", "ORCA_TERMINAL_HANDLE"}, k)
 	})
 	return slices.Concat(base, []string{"CAIRN_HOME=" + dir}, env)
 }
@@ -364,5 +365,96 @@ func TestPanel(t *testing.T) {
 	err = cmd.Run()
 	if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 || strings.Count(stderr.String(), "\n") != 1 || !strings.HasPrefix(stderr.String(), "cairn: orca terminal: ") {
 		t.Errorf("panel = %v, stderr %q", err, stderr.String())
+	}
+}
+
+// folderRepo is a git repo on branch feat/x whose origin is o/r, with a trail t holding
+// o/r#1, cached as that branch's PR.
+func folderRepo(t *testing.T, app ui.App) string {
+	t.Helper()
+	repo := filepath.Join(t.TempDir(), "repo")
+	for _, args := range [][]string{
+		{"init", "-q", "-b", "feat/x", repo},
+		{"-C", repo, "remote", "add", "origin", "git@github.com:o/r.git"},
+		{"-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %q: %v\n%s", args, err, out)
+		}
+	}
+	writeTrail(t, app, "t", "# t\n\n- [ ] o/r#1\n- [ ] release\n\n## Notes\n")
+	url := trail.URL("o/r#1")
+	app.Cache.Query = func([]string) (map[string]github.PR, error) {
+		return map[string]github.PR{url: {Number: 1, State: "OPEN", Head: "feat/x"}}, nil
+	}
+	app.Cache.Fetch([]string{url})
+	return repo
+}
+
+func TestShowJSONVia(t *testing.T) {
+	bin, err := build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := cairnEnv(t, "CLAUDE_CODE_SESSION_ID=s1")
+	i := slices.IndexFunc(env, func(kv string) bool { return strings.HasPrefix(kv, "CAIRN_HOME=") })
+	app := newApp(strings.TrimPrefix(env[i], "CAIRN_HOME="))
+	repo := folderRepo(t, app)
+	via := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command(bin, args...)
+		cmd.Env = env
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("%q: %v", args, err)
+		}
+		var d struct {
+			Trail *struct {
+				Name string `json:"name"`
+			} `json:"trail"`
+			Via string `json:"via"`
+		}
+		if err := json.Unmarshal(out, &d); err != nil {
+			t.Fatalf("%q: %s", args, out)
+		}
+		if d.Trail == nil {
+			return "none"
+		}
+		return d.Trail.Name + " via " + d.Via
+	}
+
+	if got := via("show", "--json", "--dir", t.TempDir()); got != "none" {
+		t.Errorf("outside a repo: %s", got)
+	}
+	if got := via("--json", "--dir", repo); got != "t via dir" {
+		t.Errorf("--dir: %s", got)
+	}
+	if app.Sessions.Trail("s1") != "" {
+		t.Error("showing the folder's trail joined it")
+	}
+	app.Sessions.Bind("s1", "mine")
+	if got := via("show", "--json", "--dir", repo); got != "mine via session" {
+		t.Errorf("own trail: %s", got)
+	}
+}
+
+func TestWriteErrorsNameFolderTrail(t *testing.T) {
+	app := testApp(t, nil)
+	repo := folderRepo(t, app)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "s1")
+	t.Chdir(repo)
+	for _, args := range []string{"add x", "done 1", "note hi", "link 1 o/r#1"} {
+		want := "this session has no trail; this folder's branch feat/x is on trail t, run `cairn use t` to join it"
+		if err := run(app, strings.Fields(args)); err == nil || err.Error() != want {
+			t.Errorf("%q: %v", args, err)
+		}
+	}
+	t.Chdir(t.TempDir())
+	for _, args := range []string{"add x", "done 1", "note hi", "link 1 o/r#1"} {
+		if err := run(app, strings.Fields(args)); err == nil || err.Error() != "this session has no trail; run `cairn use <name>` first" {
+			t.Errorf("%q outside the repo: %v", args, err)
+		}
 	}
 }

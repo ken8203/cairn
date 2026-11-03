@@ -256,3 +256,99 @@ func TestRecordPlaces(t *testing.T) {
 		t.Errorf("places = %+v", got)
 	}
 }
+
+func TestResolveDir(t *testing.T) {
+	repo, wt := gitRepo(t, "git@github.com:o/r.git", "feat/x")
+	s := newStore(t)
+	heads := map[string]string{}
+	head := func(url string) string { return heads[url] }
+	write := func(name, content string, age time.Duration) {
+		t.Helper()
+		os.MkdirAll(s.Trails.Dir, 0o755)
+		os.WriteFile(s.Trails.File(name), []byte(content), 0o644)
+		at := time.Now().Add(-age)
+		os.Chtimes(s.Trails.File(name), at, at)
+	}
+	resolve := func(dir string) string {
+		t.Helper()
+		name, _ := s.ResolveDir(dir, head)
+		return name
+	}
+
+	if got := resolve(repo); got != "" {
+		t.Errorf("without trails: %q", got)
+	}
+
+	// A PR whose head GitHub hasn't told yet matches nothing.
+	write("old", "# old\n\n- [ ] O/R#1\n", 2*time.Hour)
+	write("other-repo", "# other-repo\n\n- [ ] o/s#2\n", 0)
+	heads["https://github.com/o/s/pull/2"] = "feat/x"
+	if got := resolve(repo); got != "" {
+		t.Errorf("unknown head: %q", got)
+	}
+	heads["https://github.com/O/R/pull/1"] = "feat/x"
+	if got := resolve(filepath.Join(repo)); got != "old" {
+		t.Errorf("by PR head = %q", got)
+	}
+
+	// Of several matching trails, the one changed last.
+	write("new", "# new\n\n- [ ] free\n- [ ] o/r#3\n", time.Hour)
+	heads["https://github.com/o/r/pull/3"] = "feat/x"
+	if got := resolve(repo); got != "new" {
+		t.Errorf("several = %q", got)
+	}
+
+	// The worktree's branch has no PR yet, but a session recorded one from it.
+	if got := resolve(wt); got != "" {
+		t.Errorf("worktree without a match: %q", got)
+	}
+	write("w", "# w\n\n- [ ] o/q#9\n", 0)
+	s.Record("s2", "https://github.com/o/q/pull/9", false, "", Place{wt, "o/r", "wt-branch"}) // not on a trail
+	if got := resolve(wt); got != "" {
+		t.Errorf("a session without a trail: %q", got)
+	}
+	s.Record("s1", "https://github.com/o/q/pull/9", false, "", Place{wt, "o/r", "wt-branch"})
+	s.Bind("s1", "w")
+	if got := resolve(wt); got != "w" {
+		t.Errorf("by place = %q", got)
+	}
+	// A PR match beats a place.
+	s.Record("s1", "https://github.com/o/q/pull/9", false, "", Place{repo, "o/r", "feat/x"})
+	if got := resolve(repo); got != "new" {
+		t.Errorf("PR head vs place = %q", got)
+	}
+
+	if got := resolve(t.TempDir()); got != "" {
+		t.Errorf("outside a repo: %q", got)
+	}
+}
+
+func TestFind(t *testing.T) {
+	repo, _ := gitRepo(t, "https://github.com/o/r.git", "feat/x")
+	s := newStore(t)
+	os.MkdirAll(s.Trails.Dir, 0o755)
+	os.WriteFile(s.Trails.File("folder"), []byte("# folder\n\n- [ ] o/r#1\n"), 0o644)
+	head := func(string) string { return "feat/x" }
+
+	tests := []struct {
+		name, agent, pane, dir string
+		setup                  func()
+		want                   Found
+	}{
+		{"nothing", "a1", "", "", nil, Found{Key: "a1"}},
+		{"folder", "a1", "", repo, nil, Found{Key: "a1", Trail: "folder", Via: "dir", Place: Place{repo, "o/r", "feat/x"}}},
+		{"pane's session", "", "p1", repo, func() { s.Bind("a2", "theirs"); s.NotePane("a2", "p1") }, Found{Key: "a2", Trail: "theirs", Via: "pane"}},
+		{"pane as a session", "", "p2", repo, func() { s.Bind("p2", "human") }, Found{Key: "p2", Trail: "human", Via: "session"}},
+		{"agent beats the pane", "a1", "p1", repo, func() { s.Bind("a1", "mine") }, Found{Key: "a1", Trail: "mine", Via: "session"}},
+		{"agent without a trail follows the pane", "a3", "p1", repo, nil, Found{Key: "a2", Trail: "theirs", Via: "pane"}},
+		{"no pane nor agent", "", "", repo, nil, Found{Trail: "folder", Via: "dir", Place: Place{repo, "o/r", "feat/x"}}},
+	}
+	for _, tt := range tests {
+		if tt.setup != nil {
+			tt.setup()
+		}
+		if got := s.Find(tt.agent, tt.pane, tt.dir, head); got != tt.want {
+			t.Errorf("%s: got %+v, want %+v", tt.name, got, tt.want)
+		}
+	}
+}
