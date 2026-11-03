@@ -30,9 +30,9 @@ type host struct {
 	label func() string
 	// title is the title of the pane a key body names.
 	title func(body string) string
-	// panel toggles the panel running watch beside the pane a key body names, or with
-	// close only closes it.
-	panel func(body string, watch []string, close bool) error
+	// panel toggles the panel running w beside the pane a key body names, or with close
+	// only closes it.
+	panel func(body string, w watch, close bool) error
 }
 
 // hosts in detection order, innermost first: herdr usually runs inside another terminal
@@ -136,16 +136,20 @@ func Panel(cairn, key, dir string, close bool) error {
 		}
 	}
 	h, body := lookup(hosts, key)
-	return h.panel(body, watchCmd(cairn, key, dir), close)
+	return h.panel(body, watch{cairn, key, dir}, close)
 }
 
-// watchCmd is the panel's command: `cairn watch <key>`, with the folder to fall back to.
-func watchCmd(cairn, key, dir string) []string {
-	watch := []string{cairn, "watch", key}
-	if dir != "" {
-		watch = append(watch, "--dir", dir)
+// watch is what the panel runs: the cairn binary, the pane key it watches, and the folder
+// to fall back to.
+type watch struct{ cairn, key, dir string }
+
+// argv is the panel's command: `cairn watch <key>`, with the folder to fall back to.
+func (w watch) argv() []string {
+	argv := []string{w.cairn, "watch", w.key}
+	if w.dir != "" {
+		argv = append(argv, "--dir", w.dir)
 	}
-	return watch
+	return argv
 }
 
 // errNoPane is a panel's error for a key that names no pane in its host.

@@ -30,6 +30,9 @@ var herdr = host{
 	panel: herdrPanel,
 }
 
+// herdrBin is the herdr CLI: the one that started a plugin action, else herdr on PATH.
+func herdrBin() string { return cmp.Or(os.Getenv("HERDR_BIN_PATH"), "herdr") }
+
 // herdrSession is the herdr session cairn runs in; herdr calls an unnamed one default.
 func herdrSession() string { return cmp.Or(os.Getenv("HERDR_SESSION"), "default") }
 
@@ -56,7 +59,7 @@ func herdrGet(session, pane string) herdrPaneInfo {
 		} `json:"result"`
 	}
 	if pane != "" {
-		decode(&res, "herdr", "--session", session, "pane", "get", pane)
+		decode(&res, herdrBin(), "--session", session, "pane", "get", pane)
 	}
 	return res.Result.Pane
 }
@@ -75,7 +78,7 @@ func herdrLabel(session, workspace string) string {
 			} `json:"workspace"`
 		} `json:"result"`
 	}
-	decode(&res, "herdr", "--session", session, "workspace", "get", workspace)
+	decode(&res, herdrBin(), "--session", session, "workspace", "get", workspace)
 	return res.Result.Workspace.Label
 }
 
@@ -88,17 +91,26 @@ type herdrListed struct {
 	Label string `json:"label"`
 }
 
-// herdrPanel splits the panel off to the right of the pane, or closes the panel in the
-// pane's tab.
-func herdrPanel(body string, watch []string, close bool) error {
+// cairn's herdr plugin, which cairn setup links: its overlay pane runs
+// `cairn watch --from-env` with the key and folder in CAIRN_PANE and CAIRN_DIR.
+const (
+	herdrPlugin     = "cairn"
+	herdrEntrypoint = "panel"
+)
+
+// herdrPanel opens the panel as the cairn plugin's overlay over the pane, else splits it
+// off to the right, or closes the panel in the pane's tab. Run as the plugin's action,
+// the folder is the focused pane's, the action's own cwd being the plugin's.
+func herdrPanel(body string, w watch, close bool) error {
 	session, pane := herdrPane(body)
 	if pane == "" {
 		return errNoPane("herdr", body)
 	}
+	bin := herdrBin()
 	herdr := func(args ...string) ([]byte, error) {
-		return cli("", "herdr", slices.Concat([]string{"--session", session, "pane"}, args)...)
+		return cli("", bin, slices.Concat([]string{"--session", session}, args)...)
 	}
-	out, err := herdr("list")
+	out, err := herdr("pane", "list")
 	if err != nil {
 		return err
 	}
@@ -118,14 +130,23 @@ func herdrPanel(body string, watch []string, close bool) error {
 	tab := panes[i].Tab
 	for _, p := range panes {
 		if p.Tab == tab && p.Label == panelTitle {
-			_, err := herdr("close", p.ID)
+			_, err := herdr("pane", "close", p.ID)
 			return err
 		}
 	}
 	if close {
 		return nil
 	}
-	out, err = herdr("split", pane, "--direction", "right", "--ratio", herdrPanelRatio, "--no-focus")
+	w.dir = cmp.Or(herdrActionCwd(), w.dir)
+	if herdrLinked(herdr) {
+		args := []string{"plugin", "pane", "open", "--plugin", herdrPlugin, "--entrypoint", herdrEntrypoint, "--placement", "overlay", "--env", "CAIRN_PANE=" + w.key}
+		if w.dir != "" {
+			args = append(args, "--env", "CAIRN_DIR="+w.dir)
+		}
+		_, err := herdr(args...)
+		return err
+	}
+	out, err = herdr("pane", "split", pane, "--direction", "right", "--ratio", herdrPanelRatio, "--no-focus")
 	if err != nil {
 		return err
 	}
@@ -140,9 +161,38 @@ func herdrPanel(body string, watch []string, close bool) error {
 		return errors.New("herdr pane split: no pane in its answer")
 	}
 	id := split.Result.Pane.ID
-	if _, err := herdr("rename", id, panelTitle); err != nil {
+	if _, err := herdr("pane", "rename", id, panelTitle); err != nil {
 		return err
 	}
-	_, err = herdr("run", id, shellJoin(watch...))
+	_, err = herdr("pane", "run", id, shellJoin(w.argv()...))
 	return err
+}
+
+// herdrLinked reports whether cairn's plugin is linked and enabled; when herdr can't say,
+// the panel falls back to a split.
+func herdrLinked(herdr func(args ...string) ([]byte, error)) bool {
+	out, err := herdr("plugin", "list", "--plugin", herdrPlugin, "--json")
+	if err != nil {
+		return false
+	}
+	type plugin struct {
+		ID      string `json:"plugin_id"`
+		Enabled bool   `json:"enabled"`
+	}
+	var list struct {
+		Result struct {
+			Plugins []plugin `json:"plugins"`
+		} `json:"result"`
+	}
+	json.Unmarshal(out, &list)
+	return slices.ContainsFunc(list.Result.Plugins, func(p plugin) bool { return p.ID == herdrPlugin && p.Enabled })
+}
+
+// herdrActionCwd is the focused pane's folder when cairn runs as a plugin action.
+func herdrActionCwd() string {
+	var ctx struct {
+		Cwd string `json:"focused_pane_cwd"`
+	}
+	json.Unmarshal([]byte(os.Getenv("HERDR_PLUGIN_CONTEXT_JSON")), &ctx)
+	return ctx.Cwd
 }

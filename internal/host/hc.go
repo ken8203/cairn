@@ -65,7 +65,7 @@ func hcSpace(where string) string {
 var hcPanelLabels = []string{"herdr.space", "herdr.tab"}
 
 // hcPanel runs the panel as a terminal beside this one, or ends the one running.
-func hcPanel(body string, watch []string, close bool) error {
+func hcPanel(body string, w watch, close bool) error {
 	addr := hcAddr(body)
 	name := panelTitle + "-" + addr
 	if hcLive(name) {
@@ -96,7 +96,7 @@ func hcPanel(body string, watch []string, close bool) error {
 			args = append(args, "--label", k+"="+v)
 		}
 	}
-	_, err = cli("", "hc", slices.Concat(args, []string{"--"}, watch)...)
+	_, err = cli("", "hc", slices.Concat(args, []string{"--"}, w.argv())...)
 	return err
 }
 

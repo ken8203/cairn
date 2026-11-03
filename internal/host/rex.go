@@ -60,7 +60,7 @@ func RexPanelLua(cairn, key, dir string, close bool) (string, error) {
 	if h, _ := lookup(hosts, key); h.name != rex.name || key == "" {
 		return "", fmt.Errorf("--lua needs a Rex block, not %q", key)
 	}
-	return rexScript(key, watchCmd(cairn, key, dir), close)
+	return rexScript(key, watch{cairn, key, dir}.argv(), close)
 }
 
 //go:embed rex.lua
@@ -68,8 +68,8 @@ var rexPanelLua string
 
 // rexPanel floats the panel over the window holding the block, or closes the floating
 // layer that holds it. -b scopes the script to the block's session.
-func rexPanel(id string, watch []string, close bool) error {
-	script, err := rexScript(id, watch, close)
+func rexPanel(id string, w watch, close bool) error {
+	script, err := rexScript(id, w.argv(), close)
 	if err != nil {
 		return err
 	}

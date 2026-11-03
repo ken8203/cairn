@@ -29,7 +29,8 @@ codex plugin marketplace add ken8203/cairn && codex plugin add cairn@cairn
 ```
 
 Codex runs a plugin's hooks only once you trust them: open Codex, run `/hooks`, and
-trust cairn's two. Setup prints one `ok|done|skip|manual <step>: <detail>` line per step,
+trust cairn's two. With herdr on `PATH`, setup also writes cairn's herdr plugin to
+`${CAIRN_HOME:-~/.cairn}/herdr-plugin/` and links it (see [Panel](#panel)). Setup prints one `ok|done|skip|manual <step>: <detail>` line per step,
 runs only what's missing, never edits a config file itself, and ends with `cairn doctor`.
 `cairn setup --dry-run` shows what it would run.
 
@@ -100,6 +101,7 @@ All of cairn's state lives in `${CAIRN_HOME:-~/.cairn}`:
   sessions/<key>.json                  each session's trail, PRs and places
   panes/<pane-key>                     the last agent session that ran cairn in a pane
   cache/prs/<owner>/<repo>/<n>.json    PR state from GitHub
+  herdr-plugin/herdr-plugin.toml       cairn's herdr plugin, written by setup
 ```
 
 A session's file is
@@ -153,10 +155,11 @@ cairn done <n>             tick (or untick) free-text step n
 cairn note <text>          append a note
 cairn edit [name]          open a trail in $EDITOR
 cairn watch [pane] [--dir <path>]   keep a pane's view on screen (the panel)
+cairn watch --from-env     the same, for $CAIRN_PANE and $CAIRN_DIR (herdr's overlay)
 cairn panel [--close] [pane]   open or close a pane's panel in the terminal it runs in
 cairn panel --lua [block]  print Rex's toggle as Lua, for an init.lua action
 cairn statusline           Claude Code statusline segment
-cairn setup [--dry-run]    install cairn's plugin in Claude Code and Codex, then run doctor
+cairn setup [--dry-run]    install cairn's plugin in Claude Code, Codex and herdr, then run doctor
 cairn doctor [--json]      check the install without changing it; exit 1 on a failure
 cairn skills list          the guides for agents built into cairn
 cairn skills get <topic> [--full]   print a guide: cairn (using it), setup
@@ -167,7 +170,9 @@ cairn record [--own] [--session id] [-C dir] [-R repo] [pr]   remember a PR (the
 `cairn doctor` prints `ok|warn|fail <check>: <detail>` lines, or with `--json` an array of
 `{check,status,detail,fix}`: whether `cairn` on `PATH` is this binary, `gh` is logged in,
 `cairn@cairn` is installed and enabled in Claude Code and Codex, and both its hooks are
-trusted in `$CODEX_HOME/config.toml`, then the terminal host, pane and agent session.
+trusted in `$CODEX_HOME/config.toml`, and, with herdr installed, cairn's herdr plugin
+linked to this binary (a `warn` otherwise), then the terminal host, pane and agent
+session.
 Untrusted or disabled Codex hooks are a `warn`, since setup can't trust them for you.
 Last, an `orca` line counts the Orca worktrees on trails, or says Orca isn't installed.
 
@@ -225,7 +230,7 @@ to see the trail, and a host's own keybinding can pass the focused pane's key.
 | --- | --- | --- |
 | Rex | a floating layer over the window, labelled `cairn` (`rex do - -b <block>` with a Lua script cairn carries) | an `init.lua` action, below |
 | tmux | a popup, 80% by 50%, over the pane; <kbd>q</kbd> closes it | `bind-key T run-shell 'cairn panel'` |
-| herdr | a pane split off to the right, 35% wide, named `cairn` in the same tab | a herdr keybinding or command that runs `cairn panel` |
+| herdr | an overlay pane over the pane, labelled `cairn`, from cairn's herdr plugin; without the plugin, a pane split off to the right, 35% wide | the plugin's `cairn.panel` action, below |
 | Herdr.app | a terminal named `cairn-<address>` in the same space and tab, from `hc run` | a Herdr.app command that runs `cairn panel` |
 | Orca | a terminal split off the pane, titled `cairn` | an Orca command that runs `cairn panel` |
 
@@ -240,6 +245,25 @@ rex.action{ name = "cairn", title = "Toggle Cairn", run = function(ctx)
   loadstring(res.stdout)()
 end }
 rex.bind("ctrl+cmd+p", "cairn")
+```
+
+For herdr, `cairn setup` writes a plugin, `herdr-plugin.toml` in
+`${CAIRN_HOME:-~/.cairn}/herdr-plugin/`, whose commands use the absolute path of the cairn
+that wrote it: a `panel` action, "Toggle cairn", runs `cairn panel`, and a `panel` pane,
+an overlay titled `cairn`, runs `cairn watch --from-env`. Setup rewrites the file when it
+differs, as after cairn moved, and runs `herdr plugin link <dir>` when herdr doesn't have
+it from there or it was rewritten. Linked plugins are global to the user, across herdr
+sessions. `cairn panel` then opens the overlay with `herdr plugin pane open --plugin cairn
+--entrypoint panel --placement overlay --env CAIRN_PANE=<key> --env CAIRN_DIR=<dir>`; run
+as the action, it takes the focused pane's folder from `$HERDR_PLUGIN_CONTEXT_JSON`. Setup
+never edits herdr's config, so bind the action yourself in `~/.config/herdr/config.toml`:
+
+```toml
+[[keys.command]]
+key = "prefix+t"
+type = "plugin_action"
+command = "cairn.panel"
+description = "toggle cairn"
 ```
 
 In Ghostty or any other terminal without a pane API, `cairn panel` says so and exits 0:

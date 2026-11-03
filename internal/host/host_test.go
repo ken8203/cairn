@@ -18,6 +18,8 @@ func clearEnv(t *testing.T) {
 	}
 	t.Setenv("ORCA_WORKTREE_ID", "")
 	t.Setenv("HERDR_SESSION", "")
+	t.Setenv("HERDR_BIN_PATH", "")
+	t.Setenv("HERDR_PLUGIN_CONTEXT_JSON", "")
 	t.Setenv("HC_SCOPE", "")
 }
 
