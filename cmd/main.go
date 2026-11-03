@@ -52,10 +52,7 @@ session that joins it. cairn's agent hook records the PRs each session touches.
 
 func main() {
 	home, _ := os.UserHomeDir()
-	app := newApp(
-		filepath.Join(cmp.Or(os.Getenv("XDG_STATE_HOME"), filepath.Join(home, ".local/state")), "cairn"),
-		filepath.Join(cmp.Or(os.Getenv("XDG_CACHE_HOME"), filepath.Join(home, ".cache")), "cairn"),
-	)
+	app := newApp(cmp.Or(os.Getenv("CAIRN_HOME"), filepath.Join(home, ".cairn")))
 	if len(os.Args) > 1 && os.Args[1] == "hook" {
 		runHook(app, os.Stdin, os.Stdout)
 		return
@@ -73,12 +70,12 @@ func where(app ui.App) setup.Env {
 	return setup.Env{Host: host.Name, Pane: session.Pane, Agent: session.Agent, Trail: app.Sessions.Trail}
 }
 
-// newApp wires cairn's state and cache dirs to the real GitHub and terminal hosts.
-func newApp(state, cache string) ui.App {
-	trails := trail.Store{Dir: filepath.Join(state, "trails")}
+// newApp wires cairn's home, its state and cache, to the real GitHub and terminal hosts.
+func newApp(home string) ui.App {
+	trails := trail.Store{Dir: filepath.Join(home, "trails")}
 	return ui.App{
-		Sessions: session.Store{Dir: state, Trails: trails, Label: host.Label},
-		Cache:    github.Cache{Dir: cache, TTL: ttl, Query: github.Query},
+		Sessions: session.Store{Dir: home, Trails: trails, Label: host.Label},
+		Cache:    github.Cache{Dir: filepath.Join(home, "cache"), TTL: ttl, Query: github.Query},
 		Title:    host.Title,
 		Spawn:    spawn,
 	}

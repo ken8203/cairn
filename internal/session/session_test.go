@@ -1,8 +1,12 @@
 package session
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -66,8 +70,83 @@ func TestNotePane(t *testing.T) {
 	}
 
 	s.NotePane("s3", "")
-	if files, _ := filepath.Glob(filepath.Join(s.panesDir(), "*.session")); len(files) != 1 {
+	if files := s.pointers(); len(files) != 1 {
 		t.Errorf("pointers = %q outside a pane", files)
+	}
+}
+
+func TestNotePaneExpires(t *testing.T) {
+	s := newStore(t)
+	for _, p := range []string{"old", "kept", "recent"} {
+		s.NotePane("s1", p)
+	}
+	expired := time.Now().Add(-paneTTL - time.Hour)
+	os.Chtimes(s.pointerFile("old"), expired, expired)
+	os.Chtimes(s.pointerFile("kept"), expired, expired)
+
+	// An agent still running in a pane keeps its pointer alive without rewriting it.
+	if err := s.NotePane("s1", "kept"); err != nil {
+		t.Fatal(err)
+	}
+	if fi, _ := os.Stat(s.pointerFile("kept")); time.Since(fi.ModTime()) > time.Minute {
+		t.Error("a pointer in use was not touched")
+	}
+	if _, err := os.Stat(s.pointerFile("old")); err != nil {
+		t.Error("expired before any pointer was written")
+	}
+
+	if err := s.NotePane("s2", "new"); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, f := range s.pointers() {
+		got = append(got, filepath.Base(f))
+	}
+	if !slices.Equal(got, []string{"kept", "new", "recent"}) {
+		t.Errorf("pointers = %q", got)
+	}
+}
+
+func TestSessionFile(t *testing.T) {
+	s := newStore(t)
+	if err := s.Record("s1", "https://github.com/o/r/pull/1", false, ""); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(s.sessionFile("s1"))
+	if !regexp.MustCompile(`^\{"trail":null,"prs":\["https://github.com/o/r/pull/1"\],"updated":"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}(Z|[+-][0-9:]{5})"\}\n$`).Match(b) {
+		t.Errorf("file = %s", b)
+	}
+	if err := s.Bind("s1", "t"); err != nil {
+		t.Fatal(err)
+	}
+	if got, urls := s.Trail("s1"), s.URLs("s1"); got != "t" || !slices.Equal(urls, []string{"https://github.com/o/r/pull/1"}) {
+		t.Errorf("trail %q, prs %q", got, urls)
+	}
+	if s.Trail("nobody") != "" || s.URLs("nobody") != nil {
+		t.Error("a session without a file has state")
+	}
+}
+
+// A hook's record and an agent's `cairn use` run at once without losing either.
+func TestSessionConcurrentWrites(t *testing.T) {
+	s := newStore(t)
+	const n = 20
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Go(func() {
+			if err := s.Record("s1", fmt.Sprintf("https://github.com/o/r/pull/%d", i), false, ""); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	wg.Go(func() {
+		if err := s.Bind("s1", "t"); err != nil {
+			t.Error(err)
+		}
+	})
+	wg.Wait()
+	if got := len(s.URLs("s1")); got != n || s.Trail("s1") != "t" {
+		t.Errorf("%d PRs, trail %q", got, s.Trail("s1"))
 	}
 }
 

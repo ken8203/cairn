@@ -121,7 +121,12 @@ func (s Store) Create(name string) (bool, error) {
 // lock takes an advisory lock on a sibling of the trail, since the trail itself is
 // replaced on every write.
 func (s Store) lock(name string) (unlock func(), err error) {
-	f, err := os.OpenFile(filepath.Join(s.Dir, "."+name+".lock"), os.O_RDWR|os.O_CREATE, 0o644)
+	return Lock(filepath.Join(s.Dir, "."+name+".lock"))
+}
+
+// Lock takes an exclusive advisory lock on file, creating it if needed.
+func Lock(file string) (unlock func(), err error) {
+	f, err := os.OpenFile(file, os.O_RDWR|os.O_CREATE, 0o644)
 	if err != nil {
 		return nil, err
 	}

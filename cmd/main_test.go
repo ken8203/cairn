@@ -24,7 +24,7 @@ func testApp(t *testing.T, known map[string]github.PR) ui.App {
 	for _, k := range []string{"CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID", "REX_BLOCK", "TMUX_PANE", "HERDR_PANE_ID", "HC_TERMINAL_ID", "ORCA_TERMINAL_HANDLE"} {
 		t.Setenv(k, "")
 	}
-	app := newApp(filepath.Join(dir, "state", "cairn"), filepath.Join(dir, "cache", "cairn"))
+	app := newApp(filepath.Join(dir, "cairn"))
 	app.Title = func(string) string { return "" }
 	app.Sessions.Label = func() string { return "" }
 	app.Cache.Query = func(urls []string) (map[string]github.PR, error) {
@@ -63,7 +63,7 @@ func sessionFile(app ui.App, name string) string {
 }
 
 func pointerFile(app ui.App, pane string) string {
-	return filepath.Join(app.Sessions.Dir, "panes", pane+".session")
+	return filepath.Join(app.Sessions.Dir, "panes", pane)
 }
 
 func readName(file string) string {
@@ -173,7 +173,7 @@ func TestRecord(t *testing.T) {
 	if err := record(app, session, recordArgs([]string{"--own", "https://github.com/o/r/pull/404"})); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(sessionFile(app, session+".prs")); err == nil {
+	if _, err := os.Stat(sessionFile(app, session+".json")); err == nil {
 		t.Error("unknown PR recorded")
 	}
 	if sessions.Trail(session) != "" {
@@ -298,7 +298,7 @@ func TestSessionSideEffects(t *testing.T) {
 	}
 }
 
-// cairnEnv runs the built cairn with temp state, in the session and host env given.
+// cairnEnv runs the built cairn with a temp home, in the session and host env given.
 func cairnEnv(t *testing.T, env ...string) []string {
 	t.Helper()
 	dir := t.TempDir()
@@ -306,7 +306,7 @@ func cairnEnv(t *testing.T, env ...string) []string {
 		k, _, _ := strings.Cut(kv, "=")
 		return slices.Contains([]string{"CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID", "REX_BLOCK", "TMUX_PANE", "HERDR_PANE_ID", "HC_TERMINAL_ID", "ORCA_TERMINAL_HANDLE"}, k)
 	})
-	return slices.Concat(base, []string{"XDG_STATE_HOME=" + dir, "XDG_CACHE_HOME=" + dir}, env)
+	return slices.Concat(base, []string{"CAIRN_HOME=" + dir}, env)
 }
 
 func TestShowJSON(t *testing.T) {

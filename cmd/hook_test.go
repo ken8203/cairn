@@ -60,7 +60,7 @@ func waitLog(path string, n int) []string {
 }
 
 // hookEnv puts the built cairn in a temp dir beside a stub cairn that logs what it would
-// record, with temp state and cache dirs.
+// record, with a temp home.
 func hookEnv(t *testing.T) (dir string, env []string) {
 	t.Helper()
 	bin, err := build()
@@ -79,8 +79,7 @@ echo "$* pane=$REX_BLOCK" >> "$LOG"
 		"PATH=/usr/bin:/bin",
 		"HOME=" + dir,
 		"LOG=" + filepath.Join(dir, "log"),
-		"XDG_STATE_HOME=" + filepath.Join(dir, "state"),
-		"XDG_CACHE_HOME=" + filepath.Join(dir, "cache"),
+		"CAIRN_HOME=" + filepath.Join(dir, "home"),
 	}
 	return dir, env
 }
@@ -149,10 +148,10 @@ func TestHookSessionStart(t *testing.T) {
 		t.Errorf("without a trail: %q", out)
 	}
 
-	state := filepath.Join(dir, "state", "cairn")
+	state := filepath.Join(dir, "home")
 	for file, content := range map[string]string{
-		"trails/t.md":       "# t\n\n- [x] release\n- [ ] flag on\n\n## Notes\n",
-		"sessions/s1.trail": "t\n",
+		"trails/t.md":      "# t\n\n- [x] release\n- [ ] flag on\n\n## Notes\n",
+		"sessions/s1.json": `{"trail":"t","prs":[],"updated":"2026-11-03T10:00:00Z"}` + "\n",
 	} {
 		os.MkdirAll(filepath.Dir(filepath.Join(state, file)), 0o755)
 		if err := os.WriteFile(filepath.Join(state, file), []byte(content), 0o644); err != nil {
@@ -163,7 +162,7 @@ func TestHookSessionStart(t *testing.T) {
 	if out := runHookBin(t, dir, append(env, "REX_BLOCK=block:p1"), start); out != want {
 		t.Errorf("got  %s\nwant %s", out, want)
 	}
-	if got := readName(filepath.Join(state, "panes", "p1.session")); got != "s1" {
+	if got := readName(filepath.Join(state, "panes", "p1")); got != "s1" {
 		t.Errorf("pane points at %q", got)
 	}
 }

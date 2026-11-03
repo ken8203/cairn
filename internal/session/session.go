@@ -4,12 +4,14 @@ package session
 
 import (
 	"cmp"
-	"errors"
+	json "encoding/json/v2"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/ken8203/cairn/internal/host"
 	"github.com/ken8203/cairn/internal/trail"
@@ -32,8 +34,8 @@ func valid(s string) string {
 	return ""
 }
 
-// Store is cairn's state dir: sessions/<key>.trail and .prs for each session,
-// panes/<pane>.session for each pane, and the trails.
+// Store is cairn's state dir: sessions/<key>.json for each session, panes/<pane> for
+// each pane, and the trails.
 type Store struct {
 	Dir    string
 	Trails trail.Store
@@ -41,35 +43,66 @@ type Store struct {
 	Label func() string
 }
 
+// state is a session's file: the trail it is on and the PRs it touched.
+type state struct {
+	Trail   *string   `json:"trail"`
+	PRs     []string  `json:"prs"`
+	Updated time.Time `json:"updated"`
+}
+
 func (s Store) sessionsDir() string { return filepath.Join(s.Dir, "sessions") }
 func (s Store) panesDir() string    { return filepath.Join(s.Dir, "panes") }
 
-func (s Store) trailFile(key string) string { return filepath.Join(s.sessionsDir(), key+".trail") }
-func (s Store) prsFile(key string) string   { return filepath.Join(s.sessionsDir(), key+".prs") }
+func (s Store) sessionFile(key string) string { return filepath.Join(s.sessionsDir(), key+".json") }
 
 // pointerFile holds the last agent session seen in a pane, which is what its panel shows.
-func (s Store) pointerFile(pane string) string { return filepath.Join(s.panesDir(), pane+".session") }
+func (s Store) pointerFile(pane string) string { return filepath.Join(s.panesDir(), pane) }
+
+func readState(file string) state {
+	var st state
+	if b, err := os.ReadFile(file); err == nil {
+		json.Unmarshal(b, &st)
+	}
+	return st
+}
+
+func (s Store) load(key string) state { return readState(s.sessionFile(key)) }
+
+// update edits a session's file under its lock and replaces it atomically, so a hook's
+// record and an agent's `cairn use` don't lose each other's change.
+func (s Store) update(key string, edit func(*state)) error {
+	if err := os.MkdirAll(s.sessionsDir(), 0o755); err != nil {
+		return err
+	}
+	unlock, err := trail.Lock(filepath.Join(s.sessionsDir(), "."+key+".lock"))
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	st := s.load(key)
+	edit(&st)
+	st.Updated = time.Now().Truncate(time.Second) // written as RFC 3339, without fractions
+	b, err := json.Marshal(st)
+	if err != nil {
+		return err
+	}
+	return trail.WriteAtomic(s.sessionFile(key), append(b, '\n'))
+}
 
 // Trail is the session's trail, or empty without one.
-func (s Store) Trail(key string) string { return readName(s.trailFile(key)) }
+func (s Store) Trail(key string) string {
+	if t := s.load(key).Trail; t != nil {
+		return *t
+	}
+	return ""
+}
 
 // URLs are the PRs the session touched.
-func (s Store) URLs(key string) []string { return readURLs(s.prsFile(key)) }
+func (s Store) URLs(key string) []string { return s.load(key).PRs }
 
 func readName(file string) string {
 	b, _ := os.ReadFile(file)
 	return strings.TrimRight(string(b), "\n")
-}
-
-func readURLs(file string) []string {
-	b, _ := os.ReadFile(file)
-	var out []string
-	for l := range strings.SplitSeq(string(b), "\n") {
-		if l != "" {
-			out = append(out, l)
-		}
-	}
-	return out
 }
 
 // Bind attaches the session to a trail, creating the trail if needed.
@@ -77,25 +110,52 @@ func (s Store) Bind(key, name string) error {
 	if _, err := s.Trails.Create(name); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(s.sessionsDir(), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(s.trailFile(key), []byte(name+"\n"), 0o644)
+	return s.update(key, func(st *state) { st.Trail = &name })
 }
 
 // PaneSession is the session a pane last ran, or the pane itself when none has.
 func (s Store) PaneSession(pane string) string { return cmp.Or(readName(s.pointerFile(pane)), pane) }
 
+// paneTTL is how long a pane pointer lasts untouched: by then its pane is long gone, as
+// hosts never reuse a pane key.
+const (
+	paneTTL      = 30 * 24 * time.Hour
+	paneTouchAge = 24 * time.Hour
+)
+
 // NotePane points the pane at the agent's session. Only an agent does: the statusline may
-// run without the agent's session id, and would point the pane back at itself.
+// run without the agent's session id, and would point the pane back at itself. A
+// pointer already right is only touched, at most every paneTouchAge, so it doesn't expire.
 func (s Store) NotePane(agent, pane string) error {
-	if agent == "" || pane == "" || readName(s.pointerFile(pane)) == agent {
+	if agent == "" || pane == "" {
+		return nil
+	}
+	file := s.pointerFile(pane)
+	if readName(file) == agent {
+		if fi, err := os.Stat(file); err == nil && time.Since(fi.ModTime()) > paneTouchAge {
+			now := time.Now()
+			os.Chtimes(file, now, now)
+		}
 		return nil
 	}
 	if err := os.MkdirAll(s.panesDir(), 0o755); err != nil {
 		return err
 	}
-	return trail.WriteAtomic(s.pointerFile(pane), []byte(agent+"\n"))
+	if err := trail.WriteAtomic(file, []byte(agent+"\n")); err != nil {
+		return err
+	}
+	for _, f := range s.pointers() {
+		if fi, err := os.Stat(f); err == nil && time.Since(fi.ModTime()) > paneTTL {
+			os.Remove(f)
+		}
+	}
+	return nil
+}
+
+// pointers are the pane pointer files, leaving out writes in progress.
+func (s Store) pointers() []string {
+	files, _ := filepath.Glob(filepath.Join(s.panesDir(), "*"))
+	return slices.DeleteFunc(files, func(f string) bool { return strings.HasPrefix(filepath.Base(f), ".") })
 }
 
 // Record remembers a PR, one GitHub knows, for the session. A PR the session's agent
@@ -103,18 +163,13 @@ func (s Store) NotePane(agent, pane string) error {
 // trail if the session has none, named after head (the PR's branch) when the pane's host
 // gives no label; being on another trail never joins the session to it.
 func (s Store) Record(key, url string, own bool, head string) error {
-	if !slices.Contains(s.URLs(key), url) {
-		if err := os.MkdirAll(s.sessionsDir(), 0o755); err != nil {
-			return err
+	err := s.update(key, func(st *state) {
+		if !slices.Contains(st.PRs, url) {
+			st.PRs = append(st.PRs, url)
 		}
-		f, err := os.OpenFile(s.prsFile(key), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o644)
-		if err != nil {
-			return err
-		}
-		_, err = fmt.Fprintln(f, url)
-		if err := errors.Join(err, f.Close()); err != nil {
-			return err
-		}
+	})
+	if err != nil {
+		return err
 	}
 
 	if !own {
@@ -156,13 +211,22 @@ func (s Store) claim(key, head string) (string, error) {
 	}
 }
 
+// sessions reads every session's file, by key.
+func (s Store) sessions() map[string]state {
+	files, _ := filepath.Glob(filepath.Join(s.sessionsDir(), "*.json"))
+	out := map[string]state{}
+	for _, f := range files {
+		out[strings.TrimSuffix(filepath.Base(f), ".json")] = readState(f)
+	}
+	return out
+}
+
 // TouchedBy maps each PR to the sessions that touched it, in key order.
 func (s Store) TouchedBy() map[string][]string {
-	files, _ := filepath.Glob(filepath.Join(s.sessionsDir(), "*.prs"))
+	all := s.sessions()
 	out := map[string][]string{}
-	for _, f := range files {
-		key := strings.TrimSuffix(filepath.Base(f), ".prs")
-		for _, url := range readURLs(f) {
+	for _, key := range slices.Sorted(maps.Keys(all)) {
+		for _, url := range all[key].PRs {
 			out[url] = append(out[url], key)
 		}
 	}
@@ -171,11 +235,10 @@ func (s Store) TouchedBy() map[string][]string {
 
 // Panes maps each session to the pane it last ran in.
 func (s Store) Panes() map[string]string {
-	files, _ := filepath.Glob(filepath.Join(s.panesDir(), "*.session"))
 	panes := map[string]string{}
-	for _, f := range files {
+	for _, f := range s.pointers() {
 		if key := readName(f); key != "" && panes[key] == "" {
-			panes[key] = strings.TrimSuffix(filepath.Base(f), ".session")
+			panes[key] = filepath.Base(f)
 		}
 	}
 	return panes
@@ -183,10 +246,11 @@ func (s Store) Panes() map[string]string {
 
 // Attached counts the sessions on each trail.
 func (s Store) Attached() map[string]int {
-	files, _ := filepath.Glob(filepath.Join(s.sessionsDir(), "*.trail"))
 	out := map[string]int{}
-	for _, f := range files {
-		out[readName(f)]++
+	for _, st := range s.sessions() {
+		if st.Trail != nil {
+			out[*st.Trail]++
+		}
 	}
 	return out
 }
