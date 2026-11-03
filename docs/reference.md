@@ -28,7 +28,9 @@ codex plugin marketplace add ken8203/cairn && codex plugin add cairn@cairn
 With herdr on `PATH`, setup also writes cairn's herdr plugin and links it (see
 [Panel](#panel)). Setup prints one `ok|done|skip|manual <step>: <detail>` line per step,
 runs only what's missing, never edits a config file itself, and ends with `cairn doctor`.
-`cairn setup --dry-run` shows what it would run.
+`cairn setup --dry-run` shows what it would run. Agents load a plugin's hooks only when a
+session starts, so after installing or enabling the plugin in an agent setup prints
+`manual <agent>-restart: restart running <Agent> sessions to load cairn's hooks`.
 
 `cairn doctor` prints `ok|warn|fail <check>: <detail>` lines, or with `--json` an array of
 `{check,status,detail,fix}`: whether `cairn` on `PATH` is this binary, `gh` is logged in,

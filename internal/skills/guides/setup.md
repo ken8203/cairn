@@ -39,6 +39,10 @@ What it does:
    line is the keybinding the user adds to `~/.config/herdr/config.toml` to toggle the
    panel; pass it on, since setup never edits that file.
 
+Agents load a plugin's hooks only when a session starts. After installing or enabling the
+plugin in an agent, setup prints `manual claude-restart` or `manual codex-restart`: tell
+the user to restart running sessions of that agent, this one included.
+
 It never edits agent settings or dotfiles itself.
 
 ## Doctor

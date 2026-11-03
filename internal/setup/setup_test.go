@@ -81,8 +81,10 @@ func TestSetupInstallsOnceAndIsIdempotent(t *testing.T) {
 		"ok gh: installed and logged in",
 		"done claude-marketplace: ran `claude plugin marketplace add ken8203/cairn`",
 		"done claude-plugin: ran `claude plugin install cairn@cairn`",
+		"manual claude-restart: restart running Claude Code sessions to load cairn's hooks",
 		"done codex-marketplace: ran `codex plugin marketplace add ken8203/cairn`",
 		"done codex-plugin: ran `codex plugin add cairn@cairn`",
+		"manual codex-restart: restart running Codex sessions to load cairn's hooks",
 		"manual codex-hooks: " + codexTrustFix,
 		"skip herdr: herdr is not on PATH",
 	}; !slices.Equal(got, want) {
@@ -133,11 +135,15 @@ func TestSetupDisabledPlugins(t *testing.T) {
 	got, cs := runSetup(false)
 	for _, want := range []string{
 		"done claude-plugin: ran `claude plugin enable cairn@cairn`",
+		"manual claude-restart: restart running Claude Code sessions to load cairn's hooks",
 		"manual codex-plugin: cairn@cairn is disabled; enable cairn in Codex's /plugins",
 	} {
 		if !slices.Contains(got, want) {
 			t.Errorf("no %q in\n%s", want, strings.Join(got, "\n"))
 		}
+	}
+	if slices.ContainsFunc(got, func(l string) bool { return strings.HasPrefix(l, "manual codex-restart:") }) {
+		t.Errorf("restart line for a plugin still disabled:\n%s", strings.Join(got, "\n"))
 	}
 	if s := statuses(cs); s["claude-plugin"] != OK || s["codex-plugin"] != Fail {
 		t.Errorf("checks: %v", cs)
@@ -158,5 +164,20 @@ func TestSetupWithoutAgentsOrGh(t *testing.T) {
 	}
 	if len(cs) != 5 || !Failed(cs) {
 		t.Errorf("checks: %v", cs)
+	}
+}
+
+func TestSetupFailedInstall(t *testing.T) {
+	dir := fakes(t, "claude")
+	failing := strings.Replace(fakeClaude, `"plugin install cairn@cairn"|`, `"plugin install cairn@cairn") echo nope >&2; exit 1 ;;
+`, 1)
+	touch(t, filepath.Join(dir, "bin"), "claude", failing)
+	os.Chmod(filepath.Join(dir, "bin", "claude"), 0o755)
+	got, _ := runSetup(false)
+	if !slices.Contains(got, "manual claude-plugin: `claude plugin install cairn@cairn` failed: exit status 1 nope; run `claude plugin install cairn@cairn` yourself") {
+		t.Errorf("setup:\n%s", strings.Join(got, "\n"))
+	}
+	if slices.ContainsFunc(got, func(l string) bool { return strings.HasPrefix(l, "manual claude-restart:") }) {
+		t.Errorf("restart line after a failed install:\n%s", strings.Join(got, "\n"))
 	}
 }

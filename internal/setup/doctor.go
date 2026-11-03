@@ -72,7 +72,7 @@ type plugin struct {
 
 // agent is a coding agent cairn's plugin installs into, driven through its CLI.
 type agent struct {
-	name                    string
+	name, title             string
 	listMarketplaces        []string
 	marketplaces            func(out []byte) ([]string, error)
 	listPlugins             []string
@@ -88,6 +88,7 @@ type agent struct {
 var agents = []agent{
 	{
 		name:             "claude",
+		title:            "Claude Code",
 		listMarketplaces: []string{"claude", "plugin", "marketplace", "list", "--json"},
 		marketplaces: func(out []byte) ([]string, error) {
 			var list []struct {
@@ -120,6 +121,7 @@ var agents = []agent{
 	},
 	{
 		name:             "codex",
+		title:            "Codex",
 		listMarketplaces: []string{"codex", "plugin", "marketplace", "list", "--json"},
 		marketplaces: func(out []byte) ([]string, error) {
 			var list struct {

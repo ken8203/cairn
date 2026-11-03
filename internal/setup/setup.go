@@ -46,7 +46,7 @@ func Run(w io.Writer, dryRun bool, env Env) []Check {
 		} else {
 			s.run(a.name+"-marketplace", a.addMarketplace)
 		}
-		step := a.name + "-plugin"
+		step, wasEnabled := a.name+"-plugin", a.enabled
 		switch {
 		case !a.installed:
 			if s.run(step, a.install) {
@@ -58,6 +58,9 @@ func Run(w io.Writer, dryRun bool, env Env) []Check {
 			s.line(Manual, step, Plugin+" is disabled; "+a.enableFix)
 		default:
 			a.enabled = s.run(step, a.enable)
+		}
+		if a.enabled && !wasEnabled {
+			s.restart(a.agent)
 		}
 		if a.hooks == nil {
 			continue
@@ -79,6 +82,12 @@ type steps struct {
 
 func (s steps) line(status, step, detail string) {
 	fmt.Fprintf(s.w, "%s %s: %s\n", status, step, detail)
+}
+
+// restart tells the user to restart the agent's running sessions, which load hooks only
+// when they start.
+func (s steps) restart(a agent) {
+	s.line(Manual, a.name+"-restart", "restart running "+a.title+" sessions to load cairn's hooks")
 }
 
 // run runs a step's command, or in a dry run says it would, and reports whether it ran.
