@@ -33,6 +33,24 @@ func TestHerdrKeyRoundTrip(t *testing.T) {
 	}
 }
 
+func TestHerdrTab(t *testing.T) {
+	for label, want := range map[string]string{
+		"2":           "",
+		"checkout v2": "checkout v2",
+	} {
+		clearEnv(t)
+		t.Setenv("HERDR_PANE_ID", "w1:p1")
+		_, log := fakeCLIs(t, map[string]string{"herdr": `case "$3 $4" in
+"pane get") echo '{"result":{"pane":{"pane_id":"w1:p1","tab_id":"w1:t3","terminal_id":"term_1"}}}' ;;
+"tab get") echo '{"result":{"tab":{"tab_id":"w1:t3","number":3,"label":"` + label + `"}}}' ;;
+esac`})
+		if got := Tab(); got != want {
+			t.Errorf("label %q: Tab = %q, want %q", label, got, want)
+		}
+		wantLog(t, log(), "herdr --session default pane get w1:p1", "herdr --session default tab get w1:t3")
+	}
+}
+
 // Without a terminal id the pane could be one herdr brought back, so there is none.
 func TestHerdrNoTerminal(t *testing.T) {
 	stubTerminal(t, "")

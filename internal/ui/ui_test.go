@@ -22,7 +22,7 @@ func newApp(t *testing.T, known map[string]github.PR) App {
 	dir := t.TempDir()
 	state := filepath.Join(dir, "state", "cairn")
 	return App{
-		Sessions: session.Store{Dir: state, Trails: trail.Store{Dir: filepath.Join(state, "trails")}, Label: func() string { return "" }},
+		Sessions: session.Store{Dir: state, Trails: trail.Store{Dir: filepath.Join(state, "trails")}, Tab: func() string { return "" }, Label: func() string { return "" }},
 		Cache: github.Cache{Dir: filepath.Join(dir, "cache", "cairn"), TTL: time.Minute, Query: func(urls []string) (map[string]github.PR, error) {
 			got := map[string]github.PR{}
 			for _, u := range urls {

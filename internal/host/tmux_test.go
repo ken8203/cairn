@@ -29,6 +29,23 @@ func TestTmuxServer(t *testing.T) {
 	}
 }
 
+func TestTmuxTab(t *testing.T) {
+	for out, want := range map[string]string{
+		"1 zsh":         "",
+		"0 checkout v2": "checkout v2",
+		"":              "",
+	} {
+		clearEnv(t)
+		t.Setenv("TMUX", tmuxEnv)
+		t.Setenv("TMUX_PANE", "%3")
+		_, log := fakeCLIs(t, map[string]string{"tmux": "echo '" + out + "'"})
+		if got := Tab(); got != want {
+			t.Errorf("%q: Tab = %q, want %q", out, got, want)
+		}
+		wantLog(t, log(), "tmux display -p -t %3 #{automatic-rename} #W")
+	}
+}
+
 func TestTmuxPanel(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("TMUX", tmuxEnv)

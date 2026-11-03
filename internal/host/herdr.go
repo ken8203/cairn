@@ -17,6 +17,7 @@ var herdr = host{
 	name:   "herdr",
 	prefix: "herdr",
 	env:    "HERDR_PANE_ID",
+	tab:    func() string { return herdrTab(herdrSession(), os.Getenv("HERDR_PANE_ID")) },
 	key: func(id string) string {
 		session := herdrSession()
 		terminal := herdrTerminal(session, id)
@@ -50,6 +51,7 @@ type herdrPaneInfo struct {
 	// Label is the name the pane was renamed to.
 	Label      string `json:"label"`
 	TerminalID string `json:"terminal_id"`
+	Tab        string `json:"tab_id"`
 }
 
 func herdrGet(session, pane string) herdrPaneInfo {
@@ -66,6 +68,24 @@ func herdrGet(session, pane string) herdrPaneInfo {
 
 // herdrTerminal is the terminal id of a pane, a var so tests need no herdr.
 var herdrTerminal = func(session, pane string) string { return herdrGet(session, pane).TerminalID }
+
+// herdrTab is the label of the tab holding a pane, unless it is still the number herdr
+// gave it.
+func herdrTab(session, pane string) string {
+	tab := herdrGet(session, pane).Tab
+	if tab == "" {
+		return ""
+	}
+	var res struct {
+		Result struct {
+			Tab struct {
+				Label string `json:"label"`
+			} `json:"tab"`
+		} `json:"result"`
+	}
+	decode(&res, herdrBin(), "--session", session, "tab", "get", tab)
+	return named(res.Result.Tab.Label)
+}
 
 func herdrLabel(session, workspace string) string {
 	if workspace == "" {

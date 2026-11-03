@@ -72,13 +72,13 @@ runs inside another terminal or tmux, tmux inside a terminal app, and either may
 Herdr.app. When they nest, only the innermost pane is recorded, so its panel is the one
 that follows the session:
 
-| Host | Pane key | Names a new trail |
-| --- | --- | --- |
-| herdr | `herdr-<session>.<id>.<terminal>` from `$HERDR_SESSION` (else `default`), `$HERDR_PANE_ID` and the pane's terminal id in `herdr pane get` | the workspace's label |
-| tmux | `tmux-<pid>.<n>` from the server pid in `$TMUX` and `$TMUX_PANE` (`%3` is `tmux-<pid>.3`) | the tmux session's name |
-| Herdr.app | `hc-<address>.<scope>` from `$HC_TERMINAL_ID` and `$HC_SCOPE`, titles and labels from the `hc` CLI | the app space in `hc get`'s `where` label |
-| Orca | `orca-<handle>` from `$ORCA_TERMINAL_HANDLE` | the worktree's directory name |
-| Rex | `$REX_BLOCK` without its `block:` prefix | the Rex session's label |
+| Host | Pane key | Tab | Label |
+| --- | --- | --- | --- |
+| herdr | `herdr-<session>.<id>.<terminal>` from `$HERDR_SESSION` (else `default`), `$HERDR_PANE_ID` and the pane's terminal id in `herdr pane get` | the label of the pane's tab in `herdr tab get`, unless still the number herdr gave it | the workspace's label |
+| tmux | `tmux-<pid>.<n>` from the server pid in `$TMUX` and `$TMUX_PANE` (`%3` is `tmux-<pid>.3`) | the window's name once renamed, which turns off its `automatic-rename` | the tmux session's name |
+| Herdr.app | `hc-<address>.<scope>` from `$HC_TERMINAL_ID` and `$HC_SCOPE`, titles and labels from the `hc` CLI | the app tab in the same `where` label, unless still its number | the app space in `hc get`'s `where` label |
+| Orca | `orca-<handle>` from `$ORCA_TERMINAL_HANDLE` | the worktree's directory name | the same |
+| Rex | `$REX_BLOCK` without its `block:` prefix | the label of the window holding the block, unless still Rex's `Window <last 8 of its id>` | the Rex session's label |
 
 Titles come from each host's CLI and are blank when it can't answer, as for a herdr
 session whose name has characters other than letters, digits, `.`, `_` and `-`, or a
@@ -93,8 +93,9 @@ or a new pane that gets an old one's number, starts fresh in cairn. Run
 
 A session that touches a PR already on another trail does not join it. When a session
 without a trail opens or pushes its own PR, cairn starts a trail for it, named after the
-pane's host as above, else the PR's branch, else `trail-<key>`, with `-2`, `-3`, … added
-if that name is taken.
+pane's tab when you named it, else the PR's branch, else the host's label (both above),
+else `trail-<key>`, with `-2`, `-3`, … added if that name is taken. A tab holds one piece
+of work, while a label such as a Rex session's is shared by every tab in it.
 
 ## State
 

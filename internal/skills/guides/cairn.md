@@ -10,8 +10,8 @@ cairn's plugin hook watches your shell commands. When you:
 
 - open a PR (`gh pr create`), or push a branch that has one (`git push`), the PR is
   recorded for this session and joins its trail, ahead of the first unfinished
-  free-text step. A session without a trail gets one, named after the terminal pane's
-  workspace or the PR's branch.
+  free-text step. A session without a trail gets one, named after the terminal tab
+  you named, else the PR's branch.
 - run `gh pr checkout|comment|review|edit|merge|ready|close|reopen|update-branch`, that
   PR is remembered as touched, but does not join the trail.
 

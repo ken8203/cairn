@@ -18,7 +18,7 @@ import (
 func newStore(t *testing.T) Store {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "cairn")
-	return Store{Dir: dir, Trails: trail.Store{Dir: filepath.Join(dir, "trails")}, Label: func() string { return "" }}
+	return Store{Dir: dir, Trails: trail.Store{Dir: filepath.Join(dir, "trails")}, Tab: func() string { return "" }, Label: func() string { return "" }}
 }
 
 func TestAgentAndPane(t *testing.T) {
@@ -188,6 +188,17 @@ func TestClaim(t *testing.T) {
 			t.Errorf("claim = %q, %v; want %q", got, err, want)
 		}
 	}
+
+	// The branch names a trail ahead of the label, which a session's other tabs share.
+	if got, _ := s.claim(key, "jay/checkout"); got != "jay-checkout" {
+		t.Errorf("branch over label = %q", got)
+	}
+	tab := "Checkout v2"
+	s.Tab = func() string { return tab }
+	if got, _ := s.claim(key, "jay/checkout"); got != "Checkout-v2" {
+		t.Errorf("tab over branch = %q", got)
+	}
+	tab = ""
 
 	label = "///"
 	os.WriteFile(s.Trails.File("jay-fix-it"), []byte("# jay-fix-it\n"), 0o644) // another session's trail

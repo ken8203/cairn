@@ -28,6 +28,24 @@ func TestRexBin(t *testing.T) {
 	}
 }
 
+func TestRexTab(t *testing.T) {
+	for window, want := range map[string]string{
+		"Window 0c450b66": "",
+		"checkout v2":     "checkout v2",
+	} {
+		clearEnv(t)
+		t.Setenv("REX_BLOCK", "block:b1")
+		_, log := fakeCLIs(t, map[string]string{"rex": `case "$1" in
+block) echo '{"block":{"block_id":"block:b1","window_id":"window:01a1-af47-e30c450b66"}}' ;;
+window) echo '{"label":"` + window + `"}' ;;
+esac`})
+		if got := Tab(); got != want {
+			t.Errorf("window %q: Tab = %q, want %q", window, got, want)
+		}
+		wantLog(t, log(), "rex block inspect block:b1 --json", "rex window inspect window:01a1-af47-e30c450b66 --json")
+	}
+}
+
 func TestRexPanel(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("REX_BLOCK", "block:b1")

@@ -15,6 +15,7 @@ var rex = host{
 	env:  "REX_BLOCK",
 	// Rex keys are bare block ids, as cairn has always stored them.
 	key:   Key,
+	tab:   func() string { return rexWindow(Key(os.Getenv("REX_BLOCK"))) },
 	label: func() string { return rexLabel(os.Getenv("REX_SESSION")) },
 	title: rexTitle,
 	panel: rexPanel,
@@ -37,6 +38,35 @@ func rexTitle(block string) string {
 	}
 	decode(&res, rexBin(), "block", "call", "-s", os.Getenv("REX_SESSION"), "-b", "block:"+block, "title", "{}")
 	return res.Title
+}
+
+// rexDefaultSuffix is how much of a window's id Rex puts in the label it gives a window
+// nobody renamed, as in Window 450b6607.
+const rexDefaultSuffix = 8
+
+// rexWindow is the label of the window holding a block, unless it is the one Rex gave it.
+func rexWindow(block string) string {
+	if block == "" {
+		return ""
+	}
+	var b struct {
+		Block struct {
+			Window string `json:"window_id"`
+		} `json:"block"`
+	}
+	decode(&b, rexBin(), "block", "inspect", "block:"+block, "--json")
+	id := b.Block.Window
+	if len(id) < rexDefaultSuffix {
+		return ""
+	}
+	var w struct {
+		Label string `json:"label"`
+	}
+	decode(&w, rexBin(), "window", "inspect", id, "--json")
+	if w.Label == "Window "+id[len(id)-rexDefaultSuffix:] {
+		return ""
+	}
+	return w.Label
 }
 
 func rexLabel(session string) string {
