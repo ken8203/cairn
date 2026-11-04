@@ -1,6 +1,6 @@
 <!doctype html>
 <html><head><meta charset="utf-8"><style>
-:root{--ink:#37352f;--dim:#8d887e;--faint:#bdb8ad;--green:#4d8a3c;--purple:#9b4f8a;--teal:#3b8a8f;--amber:#c08a1e;--claude:#d97757;--bg:#f6f4ef;--panel:#faf9f6}
+:root{--ink:#37352f;--dim:#8d887e;--faint:#bdb8ad;--green:#4d8a3c;--purple:#9b4f8a;--teal:#3b8a8f;--amber:#c08a1e;--claude:#d97757;--blue:#2f6db5;--bg:#f6f4ef;--panel:#faf9f6}
 *{box-sizing:border-box}
 html,body{margin:0;width:1200px;height:660px;overflow:hidden}
 body{background:radial-gradient(120% 140% at 0% 0%,#f9d7b3 0%,#f0a868 38%,#e07a44 68%,#b9573a 100%);font:14px/21px ui-monospace,"SF Mono",Menlo,monospace;color:var(--ink);-webkit-font-smoothing:antialiased}
@@ -11,7 +11,7 @@ body{background:radial-gradient(120% 140% at 0% 0%,#f9d7b3 0%,#f0a868 38%,#e07a4
 .bar .t{margin-left:14px}
 .term{position:absolute;left:0;right:0;top:36px;bottom:96px;padding:0 22px;display:flex;flex-direction:column;justify-content:flex-end;overflow:hidden}
 .l{white-space:pre;height:21px}
-.dim{color:var(--dim)} .faint{color:var(--faint)} .g{color:var(--green)} .p{color:var(--purple)} .te{color:var(--teal)} .a{color:var(--amber)} .c{color:var(--claude)} .b{font-weight:700}
+.dim{color:var(--dim)} .faint{color:var(--faint)} .g{color:var(--green)} .p{color:var(--purple)} .te{color:var(--teal)} .a{color:var(--amber)} .c{color:var(--claude)} .b{font-weight:700} .ln{color:var(--blue);text-decoration:underline;text-underline-offset:2px}
 .user{background:#ebe8e1;border-radius:4px;margin:0 -8px;padding:0 8px}
 .input{position:absolute;left:22px;right:22px;bottom:42px;height:42px;border:1px solid #cfcac0;border-radius:8px;padding:9px 12px;white-space:pre}
 .status{position:absolute;left:34px;bottom:12px;height:21px;white-space:pre;font-size:13px;border-radius:4px;padding:0 6px;margin-left:-6px}
@@ -105,10 +105,10 @@ function panelBody(t) {
   const body = [
     [`<span class="b">checkout-v2</span>  <span class="dim">1/${edited ? 8 : 7} done</span>`],
     [``],
-    [`<span class="dim">1</span>   <span class="dim">✓</span> api#118   <span class="p">merged</span> Add the checkout API     <span class="dim">approved</span>`],
-    [`<span class="dim">2</span> <span class="te">▶</span> ${fresh ? '<span class="g">●</span>' : '<span class="a">◌</span>'} api#121   <span class="g">open  </span> Retry failed checkouts${fresh ? '   <span class="dim">approved</span>' : ""}`, g121],
-    [`<span class="dim">3</span>   <span class="a">◌</span> web#45    <span class="g">open  </span> Checkout v2 page`],
-    [`<span class="dim">4</span>     ios#77    <span class="dim">draft </span> Checkout v2 on iOS`],
+    [`<span class="dim">1</span>   <span class="dim">✓</span> <span class="ln">api#118</span>   <span class="p">merged</span> Add the checkout API     <span class="dim">approved</span>`],
+    [`<span class="dim">2</span> <span class="te">▶</span> ${fresh ? '<span class="g">●</span>' : '<span class="a">◌</span>'} <span class="ln">api#121</span>   <span class="g">open  </span> Retry failed checkouts${fresh ? '   <span class="dim">approved</span>' : ""}`, g121],
+    [`<span class="dim">3</span>   <span class="a">◌</span> <span class="ln">web#45</span>    <span class="g">open  </span> Checkout v2 page`],
+    [`<span class="dim">4</span>     <span class="ln">ios#77</span>    <span class="dim">draft </span> Checkout v2 on iOS`],
     [`<span class="dim">5</span>   ☐ release api 1.4`],
     [`<span class="dim">6</span>   ☐ staging: enable CHECKOUT_V2`],
     [`<span class="dim">7</span>   ☐ announce checkout v2`],
