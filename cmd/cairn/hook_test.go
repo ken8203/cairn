@@ -193,7 +193,7 @@ func TestHookSessionStartFolderHint(t *testing.T) {
 // Codex asks the user to trust a hook again whenever its definition in hooks.json
 // changes, so the file stays fixed and every change of behavior goes into cairn hook.
 func TestHooksFileUnchanged(t *testing.T) {
-	b, err := os.ReadFile("../hooks/hooks.json")
+	b, err := os.ReadFile("../../hooks/hooks.json")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2,12 +2,13 @@
 
 ## Install
 
-From a checkout of github.com/ken8203/cairn:
-
 ```sh
-make install                # builds ~/.local/bin/cairn
+go install github.com/ken8203/cairn/cmd/cairn@latest   # needs Go 1.27
 cairn setup
 ```
+
+The binary lands in `$(go env GOPATH)/bin`. From a checkout of
+github.com/ken8203/cairn, `make install` builds `~/.local/bin/cairn` instead.
 
 `cairn setup` is safe to run again at any time. It prints one line per step:
 
@@ -61,7 +62,7 @@ user can trust them, so pass the fix on to them.
   restart the agent after installing: a `warn session` line saying cairn's hook hasn't
   run means this session started without them.
 - **`path` fails.** Add the directory doctor names to `PATH` in the shell profile, or
-  rerun `make install`.
+  install into a directory already on it: `GOBIN=<dir> go install …`.
 - **`gh` fails.** Install the GitHub CLI and run `gh auth login`.
 - **Codex hooks are untrusted or disabled.** Open Codex, run `/hooks`, and trust or
   enable cairn's SessionStart and PostToolUse hooks.
