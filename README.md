@@ -142,12 +142,15 @@ Clicking the panel keeps the last terminal selected. Editing stays in the CLI.
 
 Run `cairn panel` in a Herdr.app terminal to toggle the last-selected mode; `--close`
 closes Cairn in both modes without reopening it. **Dock** places it beside the terminal
-and **Float** brings it back to a window. The first Dock creates a personal copy of the
-current layout, preserving the original and other panels. Drag the divider to resize;
+and **Float** brings it back to a window. The first open defaults to Dock and creates a
+personal layout copy with a **Cairn** button beside the native tabs/Files/Changes.
+The button toggles the saved mode and stays available when the panel is hidden or floating.
+The original layout and other panels are preserved. Drag the divider to resize;
 Herdr remembers the width and Cairn remembers the mode across restarts.
 
-Floating is the default. Escape or `q` closes the panel and `r` refreshes while it has
-keyboard focus; docking does not take focus from the terminal. Setup preserves edited
+An explicitly saved Float preference is preserved. Custom tab bars without one visible
+native `tabs` block are refused with an error and a Float action. Escape or `q` closes
+the panel and `r` refreshes while it has keyboard focus; docking does not take focus from the terminal. Setup preserves edited
 mod files and leaves layouts and keys alone. To bind a key, merge into `keys.json`:
 
 ```json

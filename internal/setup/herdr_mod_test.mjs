@@ -23,7 +23,7 @@ const layoutFixture = () => ({ id: 'root', type: 'row', theme: 'graphite', child
 ] });
 
 function runtime(tree = layoutFixture()) {
-  const rt = { shared: { layout: 'main' }, trees: { main: copy(tree) }, builtins: new Set(['main']),
+  const rt = { shared: { layout: 'main', 'cairn.mode': 'float' }, trees: { main: copy(tree) }, builtins: new Set(['main']),
     disk: { '/app/layouts/main.json': JSON.stringify(tree) }, queue: [], events: [], errors: [],
     commands: [], overlays: new Set(['mod-cairn', 'unrelated']), closed: [], focus: null, keyboard: null };
   rt.flush = () => {
@@ -49,6 +49,8 @@ function runtime(tree = layoutFixture()) {
         const node = findNode(rt.trees[rt.shared.layout], args.id);
         if (!node) { rt.errors.push('missing node'); continue; }
         node.hidden = name === 'layout.hide' || (name === 'layout.toggle' && !node.hidden);
+      } else if (name === 'layout.select') {
+        findNode(rt.trees[rt.shared.layout], args.stack).active = args.child;
       } else if (name === 'mod.open') {
         assert.equal(args.name, 'cairn');
         if (rt.overlays.has('mod-cairn')) rt.overlays.delete('mod-cairn');
@@ -270,7 +272,7 @@ test('Dock wraps only the active terminal and preserves other panels, with colli
   const next = copy(plan.layout);
   for (const i of [0, 2, 3, 4, 5]) assert.deepEqual(next.children[i], original.children[i]);
   const work = findNode(next, 'work');
-  assert.deepEqual(work.children[0], original.children[1].children[0]);
+  assert.deepEqual(work.children[0].children[0].content, original.children[1].children[0].content);
   assert.deepEqual(work.children[2], original.children[1].children[2]);
   const row = work.children[1];
   assert.equal(row.type, 'row'); assert.equal(row.id, 'cairn-work-2');
@@ -355,6 +357,7 @@ test('saved dock mode routes reopen to show/hide, preserving dimensions across c
 
 test('existing dock is found by marker and reused even with a different ID', async () => {
   const h = harness();
+  h.rt.trees.main.children.push({ id: 'toolbar', type: 'block', content: { mod: 'cairn', props: { cairnMode: 'toolbar' } } });
   h.rt.trees.main.children.push({ id: 'renamed-node', type: 'block', hidden: true, size: { px: 480 },
     content: { mod: 'cairn', props: { cairnMode: 'dock' } } });
   h.rt.trees.main.children.push({ id: 'cairn-dock', type: 'block', content: { mod: 'files' } });
@@ -630,6 +633,7 @@ test('selected second stack child keeps selection after being wrapped', () => {
     { id: 'files', type: 'block', content: { mod: 'files' } },
     { id: 'terminal', type: 'block', content: { tab: 'active' } },
   ] };
+  tree.children.push({ id: 'toolbar', type: 'block', content: { mod: 'cairn', props: { cairnMode: 'toolbar' } } });
   const plan = h.dockPlan(tree);
   assert.equal(plan.layout.active, plan.layout.children[1].id);
   assert.equal(plan.layout.children[1].type, 'row');
@@ -644,6 +648,7 @@ test('stack falls back to first visible child when active is missing, stale or h
       { id: 'files', type: 'block', hidden: true, content: { mod: 'files' } },
       { id: 'terminal', type: 'block', content: { tab: 'active' } },
     ] };
+    tree.children.push({ id: 'toolbar', type: 'block', content: { mod: 'cairn', props: { cairnMode: 'toolbar' } } });
     const plan = h.dockPlan(tree);
     assert.equal(plan.layout.active, plan.layout.children[1].id);
     assert.equal(plan.layout.children[1].children[0].id, 'terminal');
@@ -662,4 +667,145 @@ test('long target and trail names can shrink without displacing dock controls or
   const title = root.nodes[1].nodes[0];
   assert.deepEqual(title.nodes[0].attrs.min_w, [0]); assert.ok(title.nodes[0].attrs.truncate);
   assert.ok(title.nodes[1].attrs.flex_shrink_0);
+});
+
+test('first open defaults to Dock with toolbar, while explicitly saved Float stays floating', async () => {
+  const rt = runtime(); delete rt.shared['cairn.mode'];
+  rt.focus = { terminal: 'vps/t2', cwd: '/remote/repo' };
+  const h = harness(rt); await settle(h);
+  assert.equal(h.focusCalls(), 0); assert.equal(h.requests.length, 0); assert.equal(h.timers.length, 0);
+  assert.equal(rt.shared['cairn.mode'], 'dock');
+  assert.equal(rt.shared['cairn.target'].machine, 'vps');
+  assert.ok(findNode(rt.trees[rt.shared.layout], 'cairn-toolbar'));
+  const float = harness(runtime());
+  assert.equal(float.focusCalls(), 1); assert.equal(float.rt.commands.length, 0);
+});
+
+test('toolbar composition preserves native tabs content, slot paint, drag and stack identity', () => {
+  const h = harness(); const tree = layoutFixture();
+  const bar = findNode(tree, 'tabs');
+  Object.assign(bar, { min: 22, max: 50, window_drag: true, background: 'chrome', border: { width: 1, color: 'border' } });
+  bar.content.props = { custom: 'preserved' };
+  const original = copy(bar);
+  tree.children[1].children[0] = { id: 'top-stack', type: 'stack', active: 'tabs', children: [bar] };
+  tree.children.push({ id: 'cairn-toolbar' }, { id: 'cairn-tabs' });
+  const result = h.dockPlan(tree).layout;
+  const row = findNode(result, 'tabs');
+  for (const key of ['id', 'size', 'min', 'max', 'window_drag', 'background', 'border']) assert.deepEqual(copy(row[key]), original[key]);
+  assert.equal(findNode(result, 'top-stack').active, 'tabs');
+  assert.deepEqual(copy(row.children[0].content), original.content);
+  assert.equal(row.children[0].id, 'cairn-tabs-2'); assert.equal(row.children[1].id, 'cairn-toolbar-2');
+  assert.equal(row.children[1].size.px, 84);
+  assert.deepEqual(bar, original);
+  assert.equal(h.dockPlan(result).layout, undefined);
+});
+
+test('existing dock without toolbar upgrades via exclusive new copy and keeps original intact', async () => {
+  const rt = personalRuntime(); const tree = rt.trees.work;
+  tree.children.push({ id: 'old-dock', type: 'block', hidden: true, size: { px: 515 }, content: { mod: 'cairn', props: { cairnMode: 'dock' } } });
+  const before = copy(tree); const originalFile = rt.disk['/app/layouts/work.json'];
+  const h = harness(rt); h.mod.switchMode(h.cx); await settle(h);
+  assert.deepEqual(rt.trees.work, before); assert.equal(rt.disk['/app/layouts/work.json'], originalFile);
+  assert.deepEqual(rt.commands.map(c => c.name), ['layout.switch']);
+  const next = rt.trees[rt.shared.layout];
+  assert.equal(h.dockNode(next).id, 'old-dock'); assert.equal(h.dockNode(next).size.px, 515);
+  assert.equal(h.dockNode(next).hidden, undefined); assert.ok(findNode(next, 'cairn-toolbar'));
+});
+
+test('custom or ambiguous tabs fail without writes and default router offers Float', async () => {
+  for (const multiple of [false, true]) {
+    const tree = layoutFixture();
+    if (multiple) tree.children.push({ id: 'other-tabs', type: 'block', content: { mod: 'tabs' } });
+    else findNode(tree, 'tabs').content.mod = 'custom-tabs';
+    const rt = runtime(tree); delete rt.shared['cairn.mode'];
+    const h = harness(rt); await settle(h);
+    assert.match(h.mod.modeError, /native tabs/);
+    assert.equal(h.mod.routeFailed, true); assert.equal(h.focusCalls(), 1);
+    assert.equal(rt.events.some(e => e.kind === 'write-start'), false); assert.deepEqual(rt.commands, []);
+    h.mod.switchMode(h.cx); assert.equal(rt.shared['cairn.mode'], 'float');
+  }
+});
+
+function toolbarButton(h) { return h.mod.render(h.cx).nodes[0]; }
+
+test('toolbar has no query, timer or focus handle and invokes the existing toggle path', async () => {
+  const rt = runtime(); rt.focus = { terminal: 'vps/t2', cwd: '/remote/repo' };
+  const h = harness(rt, { cairnMode: 'toolbar' });
+  assert.equal(h.mod.handle, undefined); assert.equal(h.focusCalls(), 0);
+  assert.equal(h.requests.length, 0); assert.equal(h.timers.length, 0); assert.equal(h.tasks.length, 0);
+  const button = toolbarButton(h); let stopped = false;
+  button.attrs.on_mouse_down[1]({}, { stop_propagation() { stopped = true; } }); assert.ok(stopped);
+  button.attrs.on_click[0]();
+  assert.deepEqual(rt.commands, [{ name: 'mod.open', args: { name: 'cairn' } }]);
+  assert.equal(rt.focus.terminal, 'vps/t2'); assert.equal(rt.shared['cairn.mode'], 'float');
+});
+
+test('toolbar highlights actual dock visibility including hidden ancestors and inactive stacks', () => {
+  const rt = runtime(); const h = harness(rt, { cairnMode: 'toolbar' });
+  const dock = { id: 'dock', type: 'block', content: { mod: 'cairn', props: { cairnMode: 'dock' } } };
+  const stack = { id: 'panels', type: 'stack', active: 'dock', children: [{ id: 'other' }, dock] };
+  rt.trees.main = { id: 'root', type: 'row', children: [stack] };
+  assert.equal(toolbarButton(h).attrs.bg[0], 'selected');
+  stack.hidden = true; assert.equal(toolbarButton(h).attrs.bg[0], 'chrome');
+  stack.hidden = false; stack.active = 'other'; assert.equal(toolbarButton(h).attrs.bg[0], 'chrome');
+  stack.children[0].hidden = true; stack.active = 'stale'; assert.equal(toolbarButton(h).attrs.bg[0], 'selected');
+  dock.hidden = true; assert.equal(toolbarButton(h).attrs.bg[0], 'chrome');
+});
+
+test('toolbar float highlight follows live acknowledgement, native close and restart', async () => {
+  const rt = runtime(); const toolbar = harness(rt, { cairnMode: 'toolbar' });
+  const floating = harness(rt); floating.mod.render(floating.cx);
+  assert.equal(toolbarButton(toolbar).attrs.bg[0], 'selected');
+  const reload = harness(rt, { cairnMode: 'toolbar' });
+  assert.equal(toolbarButton(reload).attrs.bg[0], 'chrome');
+  floating.mod.render(floating.cx); assert.equal(toolbarButton(reload).attrs.bg[0], 'selected');
+  const persisted = copy(rt.shared);
+  await floating.mod.close(floating.cx);
+  assert.equal(toolbarButton(reload).attrs.bg[0], 'chrome');
+  floating.mod.render(floating.cx); assert.equal(toolbarButton(reload).attrs.bg[0], 'chrome');
+  const restarted = runtime(); restarted.shared = persisted;
+  const afterRestart = harness(restarted, { cairnMode: 'toolbar' });
+  assert.equal(toolbarButton(afterRestart).attrs.bg[0], 'chrome');
+  const reopened = harness(restarted); reopened.mod.render(reopened.cx);
+  assert.equal(toolbarButton(afterRestart).attrs.bg[0], 'selected');
+  reopened.mod.closePanel(); assert.equal(toolbarButton(afterRestart).attrs.bg[0], 'chrome');
+});
+
+test('persistent toolbar toggles dock then latest Float without duplicate layouts or target loss', async () => {
+  const rt = runtime(); delete rt.shared['cairn.mode'];
+  rt.focus = { terminal: 'vps/t2', cwd: '/remote/repo' };
+  const first = harness(rt); await settle(first);
+  const tree = rt.trees[rt.shared.layout]; const dock = first.dockNode(tree);
+  const toolbar = harness(rt, { cairnMode: 'toolbar' });
+  assert.equal(toolbarButton(toolbar).attrs.bg[0], 'selected');
+  toolbarButton(toolbar).attrs.on_click[0](); await settle(toolbar);
+  const router = harness(rt); await settle(router);
+  assert.equal(dock.hidden, true); assert.ok(findNode(tree, 'cairn-toolbar'));
+  assert.equal(toolbarButton(toolbar).attrs.bg[0], 'chrome');
+  toolbarButton(toolbar).attrs.on_click[0](); await settle(toolbar);
+  const router2 = harness(rt); await settle(router2); assert.equal(dock.hidden, false);
+  const panel = harness(rt, { cairnMode: 'dock' }); panel.mod.switchMode(panel.cx); await settle(panel);
+  rt.focus = null; const float = harness(rt); float.mod.render(float.cx);
+  assert.equal(float.mod.target.machine, 'vps'); assert.equal(float.mod.target.cwd, '/remote/repo');
+  assert.equal(toolbarButton(toolbar).attrs.bg[0], 'selected');
+  toolbarButton(toolbar).attrs.on_click[0](); await settle(toolbar); await float.mod.close(float.cx);
+  assert.equal(rt.overlays.has('mod-cairn'), false); assert.equal(toolbarButton(toolbar).attrs.bg[0], 'chrome');
+  assert.equal(rt.commands.filter(c => c.name === 'layout.switch').length, 1);
+});
+
+test('toolbar reopen reveals a reused dock behind a hidden ancestor and inactive stack', async () => {
+  const rt = runtime(); const initial = harness(rt);
+  const tree = initial.dockPlan(rt.trees.main).layout;
+  const dock = initial.dockNode(tree);
+  const row = findNode(tree, 'cairn-work'); row.children.pop();
+  tree.children.push({ id: 'hidden-parent', type: 'column', hidden: true, children: [
+    { id: 'dock-stack', type: 'stack', active: 'other', children: [{ id: 'other' }, dock] },
+  ] });
+  rt.trees.main = tree; rt.shared['cairn.mode'] = 'dock';
+  const toolbar = harness(rt, { cairnMode: 'toolbar' });
+  assert.equal(toolbarButton(toolbar).attrs.bg[0], 'chrome');
+  const router = harness(rt); await settle(router);
+  assert.equal(toolbarButton(toolbar).attrs.bg[0], 'selected');
+  assert.equal(rt.commands.some(c => c.name === 'layout.switch' || c.name === 'layout.set'), false);
+  assert.equal(router.requests.length, 0); assert.equal(router.focusCalls(), 0);
 });

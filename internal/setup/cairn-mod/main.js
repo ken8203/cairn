@@ -1,8 +1,8 @@
 import { View, div } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
-import { closeOverlay, exec, focused, props, run, shared, setShared, terminals, theme } from "herdr";
+import { closeOverlay, exec, focused, layout, props, run, shared, setShared, terminals, theme } from "herdr";
 import { binary } from "./binary.js";
-import { prepareDock, hideDock } from "./dock.js";
+import { prepareDock, hideDock, dockVisible } from "./dock.js";
 
 // A remote address is qualified in the app, but cairn resolves it on that machine.
 export function targetFrom(focus, allTerminals) {
@@ -25,6 +25,13 @@ export function githubURL(url) {
 
 export default class Cairn extends View {
   init(_props, cx) {
+    this.toolbarMode = props()?.cairnMode === "toolbar";
+    if (this.toolbarMode) {
+      // A new probe invalidates persisted acknowledgements after restart/reload.
+      setShared("cairn.visibility-probe", String(Date.now()) + Math.random());
+      return;
+    }
+    this.floatOwner = String(Date.now()) + Math.random();
     const saved = shared("cairn.target");
     this.target = saved ? targetFrom({ terminal: (saved.machine ? saved.machine + "/" : "") + saved.terminal, cwd: saved.cwd }, []) : null;
     this.handoff = saved?.version;
@@ -39,7 +46,7 @@ export default class Cairn extends View {
     this.modeError = "";
     this.routeFailed = false;
     this.handle = cx.focus_handle();
-    if (!this.docked && props()?.overlay && shared("cairn.mode") === "dock") {
+    if (!this.docked && props()?.overlay && shared("cairn.mode") !== "float") {
       // A keybinding opens a short-lived router; it never steals focus or fetches.
       const focus = focused();
       this.target = targetFrom(focus, focus?.shown ? terminals() : []) || this.target;
@@ -113,9 +120,37 @@ export default class Cairn extends View {
 
   async close(_cx) {
     this.cancelled = true;
+    this.clearVisible();
+  }
+
+  clearVisible() {
+    this.closed = true;
+    if (this.floatOwner && shared("cairn.float-visible")?.owner === this.floatOwner) setShared("cairn.float-visible", null);
+  }
+
+  acknowledgeFloat() {
+    if (this.docked || this.closed || !props()?.overlay) return;
+    const probe = shared("cairn.visibility-probe");
+    const ack = shared("cairn.float-visible");
+    if (probe && (ack?.probe !== probe || ack?.owner !== this.floatOwner)) {
+      setShared("cairn.float-visible", { probe, owner: this.floatOwner });
+    }
+  }
+
+  toolbar() {
+    const colors = theme();
+    const probe = shared("cairn.visibility-probe");
+    const shown = dockVisible(layout()) || Boolean(probe && shared("cairn.float-visible")?.probe === probe);
+    return h_flex().size_full().pr(10).items_center().bg(colors.chrome).border_b(1).border_color(colors.border)
+      .child(h_flex().id("cairn-toggle").h(26).px(8).flex_none().items_center().rounded(6).text_size(12)
+        .bg(shown ? colors.selected : colors.chrome).text_color(shown ? colors.foreground : colors.muted)
+        .hover(style => style.bg(colors.hover))
+        .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
+        .on_click(() => run("mod.open", { name: "cairn" })).child("Cairn"));
   }
 
   closePanel() {
+    this.clearVisible();
     if (this.switching) this.cancelled = true;
     this.saveTarget();
     if (this.docked) hideDock();
@@ -148,12 +183,13 @@ export default class Cairn extends View {
     this.cancelled = false;
     cx.spawn(async cx => {
       try {
-        const command = await prepareDock(toggle);
+        const commands = await prepareDock(toggle);
         if (this.cancelled) return;
         this.saveTarget();
         setShared("cairn.mode", "dock");
+        this.clearVisible();
         this.routed = true;
-        run(command.name, command.args);
+        for (const command of commands) run(command.name, command.args);
         if (props()?.overlay) closeOverlay(props().overlay);
       } catch (error) {
         if (this.cancelled) return;
@@ -203,7 +239,9 @@ export default class Cairn extends View {
   }
 
   render(cx) {
+    if (this.toolbarMode) return this.toolbar();
     if (this.routed || this.routing) return div();
+    this.acknowledgeFloat();
     this.follow(cx);
     const colors = theme();
     const root = v_flex().size_full().min_h(0).p(this.docked ? 12 : 20).gap(14).bg(colors.background)

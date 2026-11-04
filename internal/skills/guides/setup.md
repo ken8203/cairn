@@ -43,8 +43,10 @@ What it does:
 6. With Herdr.app: installs the compact native panel under its app home's
    `mods/cairn/`, preserving edited assets as manual conflicts. Toggle with
    `cairn panel` or bind `mod.open:cairn`; both toggle the saved Floating/Dock mode.
-   The Dock button first creates a personal layout copy and a resizable sidebar;
-   later switches reuse it. Floating is the default. Setup itself leaves layouts
+   First open defaults to Dock, creating a personal layout copy with a resizable
+   sidebar and a Cairn button beside native tabs. The button toggles the same saved
+   mode; explicit Float is preserved. Older docks gain the button in a new copy.
+   Custom tab bars are refused with a Float action. Setup itself leaves layouts
    and keys alone.
 
 Agents load a plugin's hooks only when a session starts. After installing or enabling the

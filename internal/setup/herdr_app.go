@@ -100,7 +100,7 @@ func (s steps) herdrApp() {
 		}
 		s.line(Done, "herdr-mod", "wrote "+dir)
 	}
-	s.line(Manual, "herdr-app-keys", "to toggle the saved Float/Dock mode, bind mod.open:cairn in keys.json, or run `cairn panel` in a Herdr.app terminal; Dock creates a personal layout copy on first use")
+	s.line(Manual, "herdr-app-keys", "run `cairn panel` or bind mod.open:cairn; first open creates a personal Dock + Cairn toolbar copy beside native tabs, preserving saved Float; setup leaves layouts and keys alone")
 }
 
 func writeMod(dir string, files map[string][]byte) error {

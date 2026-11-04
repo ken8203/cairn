@@ -243,16 +243,21 @@ and writes nothing on a dry run. Doctor reads these files without changing them.
 Move conflicting files aside yourself before reinstalling; keep your edits in a separate
 mod if you want to maintain a variant.
 
-The mod installs with `place: "none"` and defaults to a 920 × 420 floating window.
-Herdr supplies its frame, border and shadow. **Dock** switches to a right sidebar that
-shares space with the terminal; **Float** hides the sidebar and returns to the window.
+The mod installs with `place: "none"`. First open defaults to Dock unless Float was
+explicitly saved. Float uses a 920 × 420 window with Herdr's frame, border and shadow.
+**Dock** switches to a right sidebar that shares space with the terminal; **Float** hides the sidebar and returns to the window.
 The sidebar starts at 400 px, has an invisible draggable divider and places PR titles below the
 state/CI/ref row. Herdr persists resized dimensions in its native layout state.
 Its frame matches the default terminal pane: 10 px corners, a 1 px border that uses
 the accent color while focused, and an 8 px gap beside the terminal.
 
 The first Dock in a layout without a Cairn dock creates a personal copy with a block
-beside its active-tab content. It checks actual files through `readTextFile`, using an
+beside its active-tab content and a Cairn toolbar beside the native tabs block.
+The tabs slot becomes a row, retaining its ID, geometry, paint and window-drag setting;
+its original content and props stay in a flexible child beside the fixed-width button.
+No tabs fork or extra mod is installed. An older marked dock without a toolbar is
+upgraded through a new copy; layouts containing both reuse them.
+It checks actual files through `readTextFile`, using an
 available `<layout>-cairn` name (then `-2`, `-3`, ...), skipping names with existing
 layout files or saved layout state, and creates the complete copy
 through `writeTextFile` with `expected: null` for exclusive creation. Only after that
@@ -264,6 +269,8 @@ layout, Spaces, tab bar, status and Files/Changes panels. Later switches reuse t
 by its `content.mod: "cairn"` and `content.props.cairnMode: "dock"` marker, regardless
 of its node ID. Layouts without one unambiguous active-tab block inside a container,
 or with duplicate IDs, are refused with a visible error; use Float or another layout.
+Adding a toolbar also requires exactly one visible native `content.mod: "tabs"` block.
+Custom or ambiguous tab bars are left untouched and offer Float instead.
 This customization happens on Dock, not during setup. Setup never edits layouts or keys.
 The mod does not write `.state/` files.
 
@@ -271,8 +278,12 @@ The selected mode is saved with Herdr's `shared` API under `cairn.mode`; `cairn.
 passes the last complete terminal target between copies. These runtime choices are
 separate from installed assets and do not create setup ownership conflicts.
 
-`cairn panel` and the `mod.open:cairn` keybinding toggle the saved mode. In dock mode,
-a short-lived overlay routes the toggle to the installed sidebar and closes itself,
+The Cairn toolbar button, `cairn panel` and the `mod.open:cairn` keybinding toggle the
+saved mode. The button remains when the dock is hidden or Float is selected, without
+fetching data, polling or taking focus. Its highlight follows visible dock ancestry
+and stack selection, or a live floating view. Each toolbar mount requests a fresh
+visibility acknowledgement so persisted shared values cannot light it after restart.
+In dock mode, a short-lived overlay routes the toggle to the installed sidebar and closes itself,
 without taking keyboard focus or querying cairn. `cairn panel --close` closes Cairn's
 `mod-cairn` overlay and hides marked Cairn docks in the current layout, idempotently.
 It reads the current layout's public JSON for node IDs and sends `layout.hide`; it
