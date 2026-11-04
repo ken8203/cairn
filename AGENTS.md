@@ -10,6 +10,7 @@ a session touches through agent hooks.
 make build                               # ./cairn
 make test                                # go test ./...
 go test ./internal/trail -run TestAdd    # one package, one test
+make demo                                # docs/demo.webp from docs/demo/demo.html
 ```
 
 Go 1.27, with `encoding/json/v2` imported as `json`. When writing Go, follow the
@@ -24,8 +25,9 @@ Go 1.27, with `encoding/json/v2` imported as `json`. When writing Go, follow the
   behavior across as functions.
 - A behavior change lands with its docs in the same change: the `help` const in
   `cmd/cairn/main.go` for commands, `internal/skills/guides/` for what agents using cairn
-  are told, [docs/reference.md](docs/reference.md) for the behavior, and the README when
-  it changes installing or everyday use.
+  are told, [docs/reference.md](docs/reference.md) for the behavior, the README when
+  it changes installing or everyday use, and `docs/demo/demo.html` (then `make demo`) when
+  it changes what the panel looks like.
 - Examples use fictional repos (`acme/api`, `acme/web`), in the terse, plain English of
   the existing docs.
 

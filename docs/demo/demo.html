@@ -1,0 +1,155 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+:root{--ink:#37352f;--dim:#8d887e;--faint:#bdb8ad;--green:#4d8a3c;--purple:#9b4f8a;--teal:#3b8a8f;--amber:#c08a1e;--claude:#d97757;--blue:#2f6db5;--bg:#f6f4ef;--panel:#faf9f6}
+*{box-sizing:border-box}
+html,body{margin:0;width:1200px;height:660px;overflow:hidden}
+body{background:radial-gradient(120% 140% at 0% 0%,#f9d7b3 0%,#f0a868 38%,#e07a44 68%,#b9573a 100%);font:14px/21px ui-monospace,"SF Mono",Menlo,monospace;color:var(--ink);-webkit-font-smoothing:antialiased}
+.win{position:absolute;left:60px;top:30px;width:1080px;height:600px;border-radius:12px;background:var(--bg);overflow:hidden;
+  box-shadow:0 0 0 .5px rgba(60,30,10,.25),0 2px 6px rgba(70,30,10,.18),0 30px 70px rgba(70,30,10,.38)}
+.bar{height:36px;display:flex;align-items:center;padding:0 14px;gap:8px;font:12px -apple-system,BlinkMacSystemFont,sans-serif;color:#77736b}
+.dot{width:12px;height:12px;border-radius:50%}
+.bar .t{margin-left:14px}
+.term{position:absolute;left:0;right:0;top:36px;bottom:96px;padding:0 22px;display:flex;flex-direction:column;justify-content:flex-end;overflow:hidden}
+.l{white-space:pre;height:21px}
+.dim{color:var(--dim)} .faint{color:var(--faint)} .g{color:var(--green)} .p{color:var(--purple)} .te{color:var(--teal)} .a{color:var(--amber)} .c{color:var(--claude)} .b{font-weight:700} .ln{color:var(--blue);text-decoration:underline;text-underline-offset:2px}
+.user{background:#ebe8e1;border-radius:4px;margin:0 -8px;padding:0 8px}
+.input{position:absolute;left:22px;right:22px;bottom:42px;height:42px;border:1px solid #cfcac0;border-radius:8px;padding:9px 12px;white-space:pre}
+.status{position:absolute;left:34px;bottom:12px;height:21px;white-space:pre;font-size:13px;border-radius:4px;padding:0 6px;margin-left:-6px}
+.cursor{display:inline-block;width:8px;height:17px;background:var(--ink);vertical-align:-3px;margin-left:1px}
+.layer{position:absolute;left:108px;top:92px;width:864px;height:281px;border-radius:10px;background:var(--panel);
+  box-shadow:0 0 0 .5px rgba(0,0,0,.18),0 12px 40px rgba(60,40,20,.28);transform-origin:50% 30%;opacity:0}
+.layer .bar{height:30px;font-size:11.5px}
+.layer .body{padding:0 16px;font-size:13.5px;line-height:20px}
+.layer .l{height:20px;border-radius:4px;margin:0 -6px;padding:0 6px}
+.view{height:160px;overflow:hidden}
+.key{position:absolute;right:36px;bottom:104px;display:flex;gap:6px;transform-origin:100% 100%}
+.key span{font:600 16px -apple-system,sans-serif;color:#4a463f;background:#fff;border-radius:8px;min-width:34px;text-align:center;padding:7px 11px;box-shadow:0 1px 0 #cfc9bd,0 4px 12px rgba(0,0,0,.16)}
+.cap{position:absolute;left:0;right:0;bottom:30px;display:flex;justify-content:center}
+.cap div{font:600 19px/26px -apple-system,BlinkMacSystemFont,sans-serif;color:#fff;letter-spacing:.1px;background:rgba(60,25,10,.32);padding:8px 18px;border-radius:999px;display:flex;align-items:center;gap:10px;text-shadow:0 1px 2px rgba(0,0,0,.18)}
+.cap code{font:600 17px ui-monospace,"SF Mono",Menlo,monospace;background:rgba(255,255,255,.22);padding:1px 7px;border-radius:6px}
+</style></head><body>
+<div class="win">
+  <div class="bar"><div class="dot" style="background:#fe5f57"></div><div class="dot" style="background:#febc2e"></div><div class="dot" style="background:#28c840"></div><span class="t">✳ Claude Code — ~/acme/api</span></div>
+  <div class="term" id="term"></div>
+  <div class="input" id="input"></div>
+  <div class="status" id="status"></div>
+  <div class="layer" id="layer">
+    <div class="bar"><span>›_ cairn</span></div>
+    <div class="body" id="panel"></div>
+  </div>
+  <div class="key" id="key"></div>
+</div>
+<script>
+const ask = "Retry failed checkouts in api, then open the PR";
+const bash = (cmd) => `<span class="g">⏺</span> <span class="b">Bash</span>(${cmd})`;
+const out = (s) => `  <span class="dim">⎿  ${s}</span>`;
+// [time, html, typing duration]
+const lines = [
+  [0, `<span class="user">&gt; Pick up the checkout-v2 trail</span>`], [0, ``],
+  [0, bash("cairn use checkout-v2")], [0, out("checkout-v2  0/6 done  ▶ api#118 Add the checkout API")], [0, ``],
+  [0, `<span class="user">&gt; Merge the checkout API once it's approved</span>`], [0, ``],
+  [0, bash("gh pr merge 118 --squash")], [0, out("✓ Squashed and merged acme/api#118 (Add the checkout API)")],
+  [0, `⏺ acme/api#118 is merged. Next on the trail: acme/web#45.`], [0, ``],
+  [2.5, `<span class="user">&gt; ${ask}</span>`], [2.5, ``],
+  [3.0, bash("go test ./checkout/...")], [3.4, out("ok    acme/api/checkout    0.41s")],
+  [4.1, bash("gh pr create --fill")], [4.6, out("https://github.com/acme/api/pull/121")], [5.6, ``],
+  [5.8, `⏺ acme/api#121 is open. Still to do, kept on the cairn trail:`, 0.9],
+  [6.8, `  1. Release api 1.4 to ship the retries. Say when, and I'll run it.`, 0.8],
+  [7.7, `  2. acme/web#45: point the checkout page at the retry API.`, 0.7],
+  [8.5, `  3. In staging, enable CHECKOUT_V2 and try a declined card.`, 0.7],
+];
+// [time, label, hold]
+const keys = [[9.6, "⌃ ⌘ P", 1.0], [11.8, "r"], [13.4, "e"], [14.3, "o"], [15.7, "esc"],
+  [17.3, "j"], [17.6, "j"], [17.9, "j"], [18.2, "j"], [18.5, "j"], [19.3, "k"], [19.55, "k"], [19.8, "k"], [20.05, "k"], [20.3, "k"], [21.0, "q"]];
+const added = "update the status page";
+const clamp = (x) => Math.max(0, Math.min(1, x));
+const ease = (x) => 1 - Math.pow(1 - clamp(x), 3);
+const pulse = (t, at, dur) => (t >= at && t < at + dur) ? Math.sin(Math.PI * (t - at) / dur) : 0;
+const glow = (a) => a > 0 ? `rgba(217,119,87,${(0.22 * a).toFixed(3)})` : "transparent";
+function typed(html, frac) {
+  const text = html.replace(/<[^>]+>/g, "").replace(/&gt;/g, ">");
+  let left = Math.round(text.length * clamp(frac)), out = "", i = 0;
+  while (i < html.length) {
+    if (html[i] === "<") { const j = html.indexOf(">", i); out += html.slice(i, j + 1); i = j + 1; continue; }
+    if (left <= 0) { i++; continue; }
+    if (html.startsWith("&gt;", i)) { out += "&gt;"; i += 4; } else out += html[i++];
+    left--;
+  }
+  return out;
+}
+function editor(t) {
+  const step = (x) => `<span class="dim">- [ ]</span> ${x}`;
+  const file = ["<span class='b p'># checkout-v2</span>", "", step("acme/api#118"), step("acme/api#121"), step("acme/web#45"), step("acme/ios#77"),
+    step("release api 1.4"), step("staging: enable CHECKOUT_V2"), step("announce checkout v2")];
+  const opened = t >= 14.3, insert = t >= 14.3 && t < 15.7;
+  const typedText = "- [ ] " + added, n = Math.round(typedText.length * clamp((t - 14.45) / 1.0));
+  if (opened) file.push(n <= 6 ? `<span class="dim">${typedText.slice(0, n)}</span>` : step(typedText.slice(6, n)));
+  else file.push("");
+  const row = opened ? 9 : Math.min(8, Math.max(0, Math.floor((t - 13.75) / 0.045)));
+  const col = opened ? n : 0;
+  const cur = (i, h) => {
+    if (i !== row) return h;
+    const plain = h.replace(/<[^>]+>/g, "");
+    const block = `<span style="background:#37352f;color:#faf9f6">${plain[col] ?? " "}</span>`;
+    return insert ? h + `<span style="border-left:2px solid #37352f"></span>` : (col < plain.length ? `${plain.slice(0, col)}${block}${plain.slice(col + 1)}` : h + block);
+  };
+  const lines = file.map((h, i) => `<div class="l"><span class="faint">${String(i + 1).padStart(3)} </span>${cur(i, h)}</div>`).join("");
+  const cmd = t >= 15.95 ? ":wq".slice(0, Math.round(3 * clamp((t - 15.95) / 0.35))) : insert ? "-- INSERT --" : "";
+  return lines + `<div class="l" style="background:#e9e5dc"> checkout-v2.md${opened ? " [+]" : ""}<span style="float:right">${row + 1},${col + 1}  All </span></div>` +
+    `<div class="l">${cmd === "-- INSERT --" ? `<span class="b">${cmd}</span>` : cmd}</div>`;
+}
+function panelBody(t) {
+  if (t >= 13.6 && t < 16.6) return editor(t);
+  const fresh = t >= 12.1, edited = t >= 16.6;
+  const g121 = Math.max(pulse(t, 10.3, 0.9), pulse(t, 12.1, 0.8));
+  const body = [
+    [`<span class="b">checkout-v2</span>  <span class="dim">1/${edited ? 8 : 7} done</span>`],
+    [``],
+    [`<span class="dim">1</span>   <span class="dim">✓</span> <span class="ln">api#118</span>   <span class="p">merged</span> Add the checkout API     <span class="dim">approved</span>`],
+    [`<span class="dim">2</span> <span class="te">▶</span> ${fresh ? '<span class="g">●</span>' : '<span class="a">◌</span>'} <span class="ln">api#121</span>   <span class="g">open  </span> Retry failed checkouts${fresh ? '   <span class="dim">approved</span>' : ""}`, g121],
+    [`<span class="dim">3</span>   <span class="a">◌</span> <span class="ln">web#45</span>    <span class="g">open  </span> Checkout v2 page`],
+    [`<span class="dim">4</span>     <span class="ln">ios#77</span>    <span class="dim">draft </span> Checkout v2 on iOS`],
+    [`<span class="dim">5</span>   ☐ release api 1.4`],
+    [`<span class="dim">6</span>   ☐ staging: enable CHECKOUT_V2`],
+    [`<span class="dim">7</span>   ☐ announce checkout v2`],
+    ...(edited ? [[`<span class="dim">8</span>   ☐ ${added}`, pulse(t, 17.4, 1.0)]] : []),
+    [``],
+    [`<span class="b">Notes</span>`],
+    [`  <span class="dim">-</span> 2026-11-02 #45 waiting on design review`],
+  ];
+  const down = keys.filter(([at, k]) => k === "j" && t >= at).length;
+  const up = keys.filter(([at, k]) => k === "k" && t >= at).length;
+  const top = Math.max(0, Math.min(down - up, body.length - 8));
+  return `<div class="l"><span class="dim">~/acme/api · ${fresh ? "14:33" : "14:32"}</span></div><div class="l"></div>` +
+    `<div class="view"><div style="transform:translateY(${-top * 20}px)">` +
+    body.map(([h, a]) => `<div class="l" style="background:${glow(a || 0)}">  ${h}</div>`).join("") +
+    `</div></div><div class="l"></div><div class="l"><span class="dim">1-9 open PR / tick step · e edit · r refresh · q close</span></div>`;
+}
+function setT(t) {
+  let html = lines.filter(([at]) => t >= at).map(([at, h, dur]) => `<div class="l">${dur ? typed(h, (t - at) / dur) : h}</div>`).join("");
+  if (t >= 2.5 && t < 5.8) html += `<div class="l"><span class="c">✻</span> <span class="dim">Working… (${Math.floor(t - 2.5)}s)</span></div>`;
+  document.getElementById("term").innerHTML = html;
+  const typing = t >= 0.3 && t < 2.5;
+  const shown = typing ? ask.slice(0, Math.round(ask.length * clamp((t - 0.3) / 1.9))) : "";
+  const on = typing || Math.floor(t * 2) % 2 === 0;
+  document.getElementById("input").innerHTML = `<span class="dim">&gt;</span> ${shown}<span class="cursor" style="opacity:${on ? 1 : 0}"></span>`;
+  const recorded = t >= 5.0, st = document.getElementById("status");
+  st.innerHTML = `<span class="c">◆</span> <span class="dim">Opus</span>  <span class="faint">│</span>  <span class="b">checkout-v2</span> <span class="dim">${t >= 16.6 ? "1/8" : recorded ? "1/7" : "1/6"}</span> <span class="te">▶</span> <span class="dim">${recorded ? "api#121" : "web#45"}</span>`;
+  st.style.background = glow(pulse(t, 5.0, 0.9));
+  const key = document.getElementById("key"), k = keys.filter(([at]) => t >= at).pop();
+  if (k) {
+    const [at, label, hold = 0.3] = k, age = t - at;
+    key.innerHTML = label.split(" ").map((s) => `<span>${s}</span>`).join("");
+    key.style.opacity = age < hold + 0.25 ? clamp(Math.min(age / 0.06, (hold + 0.25 - age) / 0.25)) : 0;
+    key.style.transform = `scale(${age < 0.1 ? 0.92 + 0.8 * age : 1})`;
+  } else key.style.opacity = 0;
+  const layer = document.getElementById("layer");
+  const o = ease((t - 10.0) / 0.35) * (1 - ease((t - 21.15) / 0.3));
+  layer.style.opacity = o;
+  layer.style.transform = `translateY(${(1 - o) * 10}px) scale(${0.97 + 0.03 * o})`;
+  document.getElementById("panel").innerHTML = panelBody(t);
+}
+const m = location.hash.match(/t=([\d.]+)/);
+setT(m ? +m[1] : 12.5);
+</script>
+</body></html>
