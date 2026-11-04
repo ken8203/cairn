@@ -1,7 +1,8 @@
 import { View, div } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
-import { closeOverlay, exec, focused, props, terminals, theme } from "herdr";
+import { closeOverlay, exec, focused, props, run, shared, setShared, terminals, theme } from "herdr";
 import { binary } from "./binary.js";
+import { prepareDock, hideDock } from "./dock.js";
 
 // A remote address is qualified in the app, but cairn resolves it on that machine.
 export function targetFrom(focus, allTerminals) {
@@ -24,19 +25,49 @@ export function githubURL(url) {
 
 export default class Cairn extends View {
   init(_props, cx) {
-    this.target = null;
+    const saved = shared("cairn.target");
+    this.target = saved ? targetFrom({ terminal: (saved.machine ? saved.machine + "/" : "") + saved.terminal, cwd: saved.cwd }, []) : null;
+    this.handoff = saved?.version;
+    this.docked = props()?.cairnMode === "dock";
+    this.switching = false;
+    this.routed = false;
+    this.routing = false;
+    this.cancelled = false;
     this.pending = false;
     this.data = null;
     this.error = "";
+    this.modeError = "";
+    this.routeFailed = false;
     this.handle = cx.focus_handle();
+    if (!this.docked && props()?.overlay && shared("cairn.mode") === "dock") {
+      // A keybinding opens a short-lived router; it never steals focus or fetches.
+      const focus = focused();
+      this.target = targetFrom(focus, focus?.shown ? terminals() : []) || this.target;
+      this.dock(cx, true);
+      return;
+    }
+    this.startView(cx);
+  }
+
+  startView(cx) {
     this.follow(cx);
-    this.handle.focus();
+    this.refresh(cx);
+    if (!this.docked) this.handle.focus();
     cx.timer.every(3000, cx => this.refresh(cx));
   }
 
   follow(cx) {
+    if (this.docked && shared("cairn.mode") === "dock") this.switching = false;
+    if (this.routed || this.routing || this.switching) return;
     const focus = focused();
-    const next = targetFrom(focus, focus?.shown ? terminals() : []);
+    let next = targetFrom(focus, focus?.shown ? terminals() : []);
+    const saved = shared("cairn.target");
+    if (saved?.version !== this.handoff) {
+      this.handoff = saved?.version;
+      if (!focus?.terminal && !focus?.shown && saved) {
+        next = targetFrom({ terminal: (saved.machine ? saved.machine + "/" : "") + saved.terminal, cwd: saved.cwd }, []);
+      }
+    }
     if (!next && (focus?.shown || focus?.terminal)) {
       this.target = null;
       this.data = null;
@@ -52,7 +83,7 @@ export default class Cairn extends View {
   }
 
   refresh(cx) {
-    if (!this.target || this.pending) return;
+    if (!this.target || this.pending || this.routed || this.routing || this.switching) return;
     const target = this.target;
     this.pending = true;
     cx.spawn(async cx => {
@@ -76,10 +107,71 @@ export default class Cairn extends View {
     });
   }
 
+  saveTarget() {
+    if (this.target) setShared("cairn.target", { ...this.target, version: (shared("cairn.target")?.version || 0) + 1 });
+  }
+
+  async close(_cx) {
+    this.cancelled = true;
+  }
+
+  closePanel() {
+    if (this.switching) this.cancelled = true;
+    this.saveTarget();
+    if (this.docked) hideDock();
+    else if (props()?.overlay) closeOverlay(props().overlay);
+  }
+
+  switchMode(cx) {
+    if (this.switching || this.routed) return;
+    this.saveTarget();
+    if (this.routeFailed) {
+      setShared("cairn.mode", "float");
+      this.routeFailed = false;
+      this.modeError = "";
+      cx.notify();
+      return;
+    }
+    if (this.docked) {
+      this.switching = true;
+      hideDock();
+      setShared("cairn.mode", "float");
+      run("mod.open", { name: "cairn" });
+    } else {
+      this.dock(cx);
+    }
+  }
+
+  dock(cx, toggle = false) {
+    this.switching = true;
+    this.routing = toggle;
+    this.cancelled = false;
+    cx.spawn(async cx => {
+      try {
+        const command = await prepareDock(toggle);
+        if (this.cancelled) return;
+        this.saveTarget();
+        setShared("cairn.mode", "dock");
+        this.routed = true;
+        run(command.name, command.args);
+        if (props()?.overlay) closeOverlay(props().overlay);
+      } catch (error) {
+        if (this.cancelled) return;
+        this.switching = false;
+        this.modeError = String(error);
+        this.routeFailed = toggle;
+        this.routing = false;
+        if (toggle) this.startView(cx);
+        cx.notify();
+      }
+    });
+  }
+
   key(event, cx) {
+    if (!this.handle.is_focused()) return;
     if (event.keystroke === "escape" || event.keystroke === "q") {
       cx.stop_propagation();
-      closeOverlay(props().overlay);
+      this.closePanel();
     } else if (event.keystroke === "r") {
       cx.stop_propagation();
       this.refresh(cx);
@@ -88,43 +180,60 @@ export default class Cairn extends View {
 
   pr(pr, id, refWidth, marker = "") {
     const colors = theme();
-    const row = h_flex().min_w(0).gap(10).h(28).flex_shrink_0().items_center();
+    const row = h_flex().min_w(0).gap(this.docked ? 6 : 10).h(28).flex_shrink_0().items_center();
     row.child(div().w(34).flex_shrink_0().text_color(colors.muted).child(marker));
     const finished = pr.state === "merged" || pr.state === "closed";
     const ci = finished ? "✓" : ({ pass: "●", fail: "✕", pending: "◌" }[pr.ci] || "·");
     const ciColor = finished ? colors.dim : ({ pass: colors.done, fail: colors.blocked, pending: colors.working }[pr.ci] || colors.dim);
     row.child(div().w(14).flex_shrink_0().text_color(ciColor).child(ci));
-    const ref = div().w(refWidth).flex_shrink_0().truncate().child((pr.ref || "PR").split("/").at(-1)).text_color(colors.accent).underline();
+    const ref = (this.docked ? div().flex_1().min_w(0) : div().w(refWidth).flex_shrink_0()).truncate().child((pr.ref || "PR").split("/").at(-1)).text_color(colors.accent).underline();
     if (githubURL(pr.url)) ref.id(id).on_click((_event, cx) => cx.open_url(pr.url));
     row.child(ref);
     const stateColor = { merged: colors.ansi5, open: colors.done, closed: colors.blocked }[pr.state] || colors.muted;
     row.child(div().w(58).flex_shrink_0().text_color(stateColor).child(pr.state || "unknown"));
+    if (this.docked) {
+      const block = v_flex().min_w(0).flex_shrink_0().mb(6).child(row);
+      if (pr.title) block.child(div().text_color(colors.muted).child(pr.title));
+      if (pr.stacked_on) block.child(div().text_color(colors.dim).child("↳ " + pr.stacked_on.split("/").at(-1)));
+      return block;
+    }
     row.child(div().flex_1().min_w(0).truncate().child(pr.title || ""));
     if (pr.stacked_on) row.child(div().flex_shrink_0().text_color(colors.dim).child("↳ " + pr.stacked_on.split("/").at(-1)));
     return row;
   }
 
   render(cx) {
+    if (this.routed || this.routing) return div();
     this.follow(cx);
     const colors = theme();
-    const root = v_flex().size_full().min_h(0).p(20).gap(14).bg(colors.background)
+    const root = v_flex().size_full().min_h(0).p(this.docked ? 12 : 20).gap(14).bg(colors.background)
       .text_color(colors.foreground).font_family("JetBrains Mono").text_size(13)
-      .track_focus(this.handle).on_key_down((event, cx) => this.key(event, cx));
+      .id("cairn-panel").track_focus(this.handle)
+      .on_mouse_down("left", () => this.handle.focus()).on_key_down((event, cx) => this.key(event, cx));
+    if (this.docked) root.rounded(10).border(1)
+      .border_color(this.handle.is_focused() ? colors.accent : colors.border).overflow_hidden();
     const target = this.target;
     const address = target ? (target.machine ? target.machine + "/" : "") + target.terminal : "";
     const terminal = target ? terminals().find(t => t.address === address) : null;
     const name = terminal?.name || terminal?.program?.name || terminal?.title || "Terminal";
-    const header = h_flex().items_center().gap(12).flex_shrink_0().text_color(colors.muted);
-    header.child(div().child("cairn"));
-    header.child(div().id("target").flex_1().tooltip(address)
+    const header = h_flex().min_w(0).items_center().gap(12).flex_shrink_0().text_color(colors.muted);
+    header.child(div().flex_shrink_0().child("cairn"));
+    header.child(div().id("target").flex_1().min_w(0).truncate().tooltip(address)
       .child(target ? (target.machine ? target.machine + "/" : "") + name : ""));
-    header.child(div().id("close").child("×").px(6)
+    header.child(div().id("mode").flex_shrink_0().child(this.docked || this.routeFailed ? "Float" : "Dock").text_color(colors.accent)
       .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
-      .on_click(() => closeOverlay(props().overlay)));
+      .on_click((_event, cx) => this.switchMode(cx)));
+    header.child(div().id("close").flex_shrink_0().child("×").px(6)
+      .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
+      .on_click(() => this.closePanel()));
     root.child(header);
+    if (this.modeError) root.child(div().text_color(colors.blocked).child(this.modeError));
     const body = v_flex().id("trail-scroll").flex_1().min_h(0).overflow_y_scrollbar()
-      .on_mouse_down("left", (_event, cx) => cx.stop_propagation());
-    const finish = () => root.child(body).child(div().flex_shrink_0().text_color(colors.dim).text_size(11).child("click PR to open · r refresh · q / esc close"));
+      .on_mouse_down("left", (_event, cx) => { this.handle.focus(); cx.stop_propagation(); });
+    const finish = () => {
+      root.child(body).child(div().flex_shrink_0().text_color(colors.dim).text_size(11).child(this.docked ? "PR ↗ · r refresh · q/esc close" : "click PR to open · r refresh · q / esc close"));
+      return this.docked ? div().size_full().pl(8).child(root) : root;
+    };
     if (!target) { body.child(div().text_color(colors.muted).child(this.error || "Focus a terminal to see its trail.")); return finish(); }
     if (this.error) { body.child(div().text_color(colors.blocked).child(this.error)); return finish(); }
     if (!this.data) { body.child(div().text_color(colors.muted).child("Loading trail…")); return finish(); }
@@ -132,9 +241,9 @@ export default class Cairn extends View {
     const prs = [...(trail?.steps.filter(step => step.kind === "pr") || []), ...this.data.prs];
     const refWidth = Math.min(200, Math.max(70, ...prs.map(pr => (pr.ref || "PR").split("/").at(-1).length * 8)));
     if (trail) {
-      body.child(h_flex().gap(14).mb(10).flex_shrink_0()
-        .child(div().font_semibold().child(trail.name))
-        .child(div().text_color(colors.muted).child(trail.done + "/" + trail.total + " done")));
+      body.child(h_flex().min_w(0).gap(14).mb(10).flex_shrink_0()
+        .child(div().flex_1().min_w(0).truncate().font_semibold().child(trail.name))
+        .child(div().flex_shrink_0().text_color(colors.muted).child(trail.done + "/" + trail.total + " done")));
       if (this.data.via === "dir") body.child(div().text_color(colors.muted).child("Found by folder"));
       const next = trail.steps.find(step => !step.done);
       for (const step of trail.steps) {

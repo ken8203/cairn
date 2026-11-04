@@ -34,7 +34,7 @@ From a checkout, `make install` builds `~/.local/bin/cairn` instead
 (`make install PREFIX=/usr/local` for `/usr/local/bin`). Or just ask your agent to "set
 up cairn": `cairn skills get setup` tells it how.
 
-`cairn setup` also installs a native Herdr.app floating panel when `herdr-app` is on `PATH`.
+`cairn setup` also installs a native Herdr.app panel when `herdr-app` is on `PATH`.
 It installs cairn's plugin into Claude Code and Codex, and into herdr when
 it's on `PATH`, then runs `cairn doctor` to check the install. Codex runs a plugin's hooks
 only once you trust them: open Codex, run `/hooks`, and trust cairn's two.
@@ -133,24 +133,29 @@ description = "toggle cairn"
 </details>
 
 <details>
-<summary><b>Herdr.app</b>: a compact native floating panel</summary>
+<summary><b>Herdr.app</b>: a compact native panel, floating or docked</summary>
 
 `cairn setup` installs the native mod in `~/.config/herdr-app/mods/cairn/`
 (`HERDR_APP_HOME`, else `XDG_CONFIG_HOME`, overrides the home). It shows trail
 progress, steps, PR state, CI, notes and touched PRs; click a PR to open GitHub.
 Clicking the panel keeps the last terminal selected. Editing stays in the CLI.
 
-Run `cairn panel` in a Herdr.app terminal to toggle the floating panel; `--close`
-closes it without reopening. Escape or `q` closes it; `r` refreshes the view.
-It works with shipped layouts and needs no sidebar block. Setup preserves edited
-mod files and leaves layouts and keys to you. To bind a key, merge into `keys.json`:
+Run `cairn panel` in a Herdr.app terminal to toggle the last-selected mode; `--close`
+closes Cairn in both modes without reopening it. **Dock** places it beside the terminal
+and **Float** brings it back to a window. The first Dock creates a personal copy of the
+current layout, preserving the original and other panels. Drag the divider to resize;
+Herdr remembers the width and Cairn remembers the mode across restarts.
+
+Floating is the default. Escape or `q` closes the panel and `r` refreshes while it has
+keyboard focus; docking does not take focus from the terminal. Setup preserves edited
+mod files and leaves layouts and keys alone. To bind a key, merge into `keys.json`:
 
 ```json
 { "global": { "ctrl-shift-t": "mod.open:cairn" } }
 ```
 
 Without an installed mod or a reachable app, `cairn panel` uses the `hc` terminal
-panel. [Details and remote requirements](docs/reference.md#herdrapp-floating-panel).
+panel. [Details and remote requirements](docs/reference.md#herdrapp-panel).
 
 </details>
 

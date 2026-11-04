@@ -40,10 +40,12 @@ What it does:
    line is the keybinding the user adds to `~/.config/herdr/config.toml` to toggle the
    panel; pass it on, since setup never edits that file.
 
-6. With Herdr.app: installs the compact native floating panel under its app home's
+6. With Herdr.app: installs the compact native panel under its app home's
    `mods/cairn/`, preserving edited assets as manual conflicts. Toggle with
-   `cairn panel` or bind `mod.open:cairn`. Shipped layouts work without a custom block.
-   Setup leaves layouts and keys alone.
+   `cairn panel` or bind `mod.open:cairn`; both toggle the saved Floating/Dock mode.
+   The Dock button first creates a personal layout copy and a resizable sidebar;
+   later switches reuse it. Floating is the default. Setup itself leaves layouts
+   and keys alone.
 
 Agents load a plugin's hooks only when a session starts. After installing or enabling the
 plugin in an agent, setup prints `manual claude-restart` or `manual codex-restart`: tell
@@ -56,7 +58,7 @@ It leaves agent settings, layout files and keybindings to the user.
 `cairn doctor` checks the same things without changing any, as
 `ok|warn|fail <check>: <detail>` lines (`--json` for an array of
 `{check,status,detail,fix}`), and exits 1 when a check fails. Act on each `fix`.
-The `herdr-mod` check covers assets, not whether the floating panel is open.
+The `herdr-mod` check covers assets, not whether either presentation is open.
 Codex hooks that aren't trusted or are disabled are a `warn`, not a `fail`: only the
 user can trust them, so pass the fix on to them.
 <!-- full -->

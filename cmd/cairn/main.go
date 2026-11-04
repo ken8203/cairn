@@ -44,7 +44,7 @@ session that joins it. cairn's agent hook records the PRs each session touches.
   cairn watch [pane] [--dir <path>]   keep a pane's view on screen (the panel)
   cairn watch --from-env     the same, for $CAIRN_PANE and $CAIRN_DIR (herdr's overlay)
   cairn panel [--close] [pane]   open or close a pane's panel in the terminal it runs in
-                            Herdr.app: compact native floating panel (Esc/q close, r refresh)
+                            Herdr.app: saved Float/Dock mode; first Dock creates layout copy (Esc/q close, r refresh when focused)
   cairn panel --lua [block]  print Rex's toggle as Lua, for an init.lua action
   cairn statusline           Claude Code statusline segment
   cairn setup [--dry-run]    install agent plugins and herdr/Herdr.app panels, then run doctor

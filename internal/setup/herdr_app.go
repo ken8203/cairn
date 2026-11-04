@@ -23,8 +23,9 @@ func HerdrAppHome() string {
 func modFiles(self string) map[string][]byte {
 	main, _ := herdrMod.ReadFile("cairn-mod/main.js")
 	manifest, _ := herdrMod.ReadFile("cairn-mod/mod.json")
+	dock, _ := herdrMod.ReadFile("cairn-mod/dock.js")
 	path, _ := json.Marshal(self)
-	return map[string][]byte{"main.js": main, "mod.json": manifest, "binary.js": []byte("export const binary = " + string(path) + ";\n")}
+	return map[string][]byte{"main.js": main, "dock.js": dock, "mod.json": manifest, "binary.js": []byte("export const binary = " + string(path) + ";\n")}
 }
 
 const modOwnership = ".cairn-owned.json"
@@ -99,7 +100,7 @@ func (s steps) herdrApp() {
 		}
 		s.line(Done, "herdr-mod", "wrote "+dir)
 	}
-	s.line(Manual, "herdr-app-keys", "to toggle the floating panel, bind mod.open:cairn in keys.json, or run `cairn panel` in a Herdr.app terminal; works with shipped layouts")
+	s.line(Manual, "herdr-app-keys", "to toggle the saved Float/Dock mode, bind mod.open:cairn in keys.json, or run `cairn panel` in a Herdr.app terminal; Dock creates a personal layout copy on first use")
 }
 
 func writeMod(dir string, files map[string][]byte) error {

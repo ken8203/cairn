@@ -56,6 +56,10 @@ func TestHerdrAppInstall(t *testing.T) {
 		t.Fatal(out.String())
 	}
 	dir := filepath.Join(home, "mods", "cairn")
+	helper, err := os.ReadFile(filepath.Join(dir, "dock.js"))
+	if err != nil || !strings.Contains(string(helper), "writeTextFile") {
+		t.Fatalf("missing dock helper: %v", err)
+	}
 	manifest, err := os.ReadFile(filepath.Join(dir, "mod.json"))
 	if err != nil || string(manifest) != "{\"place\":\"none\",\"overlay\":{\"kind\":\"window\",\"width\":920,\"height\":420}}\n" {
 		t.Fatalf("floating manifest: %s, %v", manifest, err)

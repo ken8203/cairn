@@ -72,7 +72,9 @@ Don't create a trail for one-off work with a single PR; the hook records it anyw
 - Sessions are keyed by `$CODEX_THREAD_ID`, else `$CLAUDE_CODE_SESSION_ID`, else the
   terminal pane, so commands you run act on your own session.
 
-- Herdr.app's native floating panel follows terminal focus and retains its target when clicked.
+- Herdr.app's native panel follows terminal focus and retains its target across Dock/Float.
   It needs current cairn on remote machines too. Nested tmux/herdr panes have only
-  folder fallback in the outer panel. Escape or `q` closes it; `r` refreshes the view.
+  folder fallback in the outer panel. Dock creates a personal layout copy on first use;
+  Float returns to a window. The mode is remembered; `cairn panel --close` closes both.
+  Escape/q close and r refresh apply only while the panel has focus.
   PR links are clickable; edit and tick steps through the CLI. Run `cairn skills get setup` for installation.

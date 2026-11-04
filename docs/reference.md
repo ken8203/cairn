@@ -43,7 +43,7 @@ marker, see [State](#state)), as one started before the plugin was installed, th
 `session` check is a `warn` whose fix is to restart that session. Last, an `orca` line
 counts the Orca worktrees on trails, or says Orca isn't installed.
 
-With `herdr-app` on `PATH`, setup also installs the [native floating panel](#herdrapp-floating-panel).
+With `herdr-app` on `PATH`, setup also installs the [native panel](#herdrapp-panel).
 Doctor adds a read-only `herdr-mod` check for missing, stale or edited assets; current
 assets do not imply that the floating panel is open.
 
@@ -209,7 +209,7 @@ README's [Panel](../README.md#panel) section shows how to bind it.
 | Rex | a floating layer over the window, labelled `cairn` (`rex do - -b <block>` with a Lua script cairn carries) |
 | tmux | a popup, 80% by 50%, over the pane |
 | herdr | an overlay pane over the pane, labelled `cairn`, from cairn's herdr plugin; without the plugin, a pane split off to the right, 35% wide, named `cairn` in the same tab |
-| Herdr.app | a native floating `cairn` mod; otherwise a terminal named `cairn-<address>` from `hc run` |
+| Herdr.app | a native `cairn` mod in saved Floating/Dock mode; otherwise a terminal named `cairn-<address>` from `hc run` |
 | Orca | a terminal split off the pane, titled `cairn` |
 
 Rex starts an action's programs without the terminal's environment, where `rex` itself
@@ -232,9 +232,9 @@ times out after 10 seconds, and a failure is one line on stderr with exit 1.
 The TUI panel opens on the cached PR states and asks GitHub for the stale ones behind them,
 fits itself to its pane as it's resized, and refreshes every 60 seconds.
 
-### Herdr.app floating panel
+### Herdr.app panel
 
-Setup embeds and installs `main.js`, `mod.json` and `binary.js` into
+Setup embeds and installs `main.js`, `dock.js`, `mod.json` and `binary.js` into
 `<app-home>/mods/cairn/`. The app home is `$HERDR_APP_HOME`, else
 `$XDG_CONFIG_HOME/herdr-app`, else `~/.config/herdr-app`. `binary.js` contains this
 cairn executable's absolute path. `.cairn-owned.json` records generated file hashes:
@@ -243,41 +243,71 @@ and writes nothing on a dry run. Doctor reads these files without changing them.
 Move conflicting files aside yourself before reinstalling; keep your edits in a separate
 mod if you want to maintain a variant.
 
-The mod installs with `place: "none"` and a 920 × 420 window overlay. Herdr supplies
-its native frame, border and shadow. It works on shipped layouts without cloning a
-layout or adding a block. Setup leaves layouts and `keys.json` to the user.
+The mod installs with `place: "none"` and defaults to a 920 × 420 floating window.
+Herdr supplies its frame, border and shadow. **Dock** switches to a right sidebar that
+shares space with the terminal; **Float** hides the sidebar and returns to the window.
+The sidebar starts at 400 px, has an invisible draggable divider and places PR titles below the
+state/CI/ref row. Herdr persists resized dimensions in its native layout state.
+Its frame matches the default terminal pane: 10 px corners, a 1 px border that uses
+the accent color while focused, and an 8 px gap beside the terminal.
 
-`cairn panel` toggles it through the official app command; `--close` closes only
-Cairn's overlay and succeeds even when it is already closed:
+The first Dock in a layout without a Cairn dock creates a personal copy with a block
+beside its active-tab content. It checks actual files through `readTextFile`, using an
+available `<layout>-cairn` name (then `-2`, `-3`, ...), skipping names with existing
+layout files or saved layout state, and creates the complete copy
+through `writeTextFile` with `expected: null` for exclusive creation. Only after that
+write succeeds does it queue `layout.switch`. A write failure or creation race leaves
+the floating view and previous mode intact with a visible error. Layout names must
+contain only letters, digits, hyphens and underscores; changing layouts during
+preparation cancels the switch. It preserves the original
+layout, Spaces, tab bar, status and Files/Changes panels. Later switches reuse the dock
+by its `content.mod: "cairn"` and `content.props.cairnMode: "dock"` marker, regardless
+of its node ID. Layouts without one unambiguous active-tab block inside a container,
+or with duplicate IDs, are refused with a visible error; use Float or another layout.
+This customization happens on Dock, not during setup. Setup never edits layouts or keys.
+The mod does not write `.state/` files.
+
+The selected mode is saved with Herdr's `shared` API under `cairn.mode`; `cairn.target`
+passes the last complete terminal target between copies. These runtime choices are
+separate from installed assets and do not create setup ownership conflicts.
+
+`cairn panel` and the `mod.open:cairn` keybinding toggle the saved mode. In dock mode,
+a short-lived overlay routes the toggle to the installed sidebar and closes itself,
+without taking keyboard focus or querying cairn. `cairn panel --close` closes Cairn's
+`mod-cairn` overlay and hides marked Cairn docks in the current layout, idempotently.
+It reads the current layout's public JSON for node IDs and sends `layout.hide`; it
+never writes layout/state files. It leaves other panels and overlays alone.
 
 ```sh
-herdr-app do mod.open --name cairn
-herdr-app do overlay.close --id mod-cairn
+herdr-app do mod.open --name cairn  # toggle the saved mode
+cairn panel --close               # close Cairn in both modes
 ```
 
 Merge `"ctrl-shift-t":"mod.open:cairn"` into a suitable `keys.json` section, such as
-`global`, keeping your other bindings. Escape or `q` closes the panel; `r` refreshes
-the view. PR links are clickable; editing and ticking steps stay in the CLI.
+`global`, keeping other bindings. The × button closes the current presentation.
+Escape or `q` closes and `r` refreshes only while Cairn has keyboard focus. Sidebar
+mounts keep terminal focus; click the panel to focus it. PR links are clickable;
+editing and ticking steps stay in the CLI.
 
 Without mod files or a reachable app, `cairn panel` falls back to the `hc` TUI panel.
-A failed native toggle or close is reported as an error. There is no layout scan or
-layout-file dependency. The native panel always follows focus, including when `panel`
-was invoked with an explicit key; it does not bind or mutate that target's session.
+A failed native command or unreadable/malformed layout during close is reported as an
+error. The native panel always follows focus, including when `panel` was invoked with
+an explicit key; it does not bind or mutate that target's session.
 
-The floating panel shows the focused terminal (including a `terminal.show` replacement),
-retains its complete target when the mod gets focus, and polls every three seconds.
+Both modes show the focused terminal (including a `terminal.show` replacement),
+retain the complete target when the mod gets focus or switches modes, and poll every three seconds.
 The header shows the terminal's name (or program/title, then `Terminal`), prefixed by
 the machine for remote targets. Hover over it to see the terminal's internal address.
-It clears old data on target changes, runs one request at a time and discards stale
+Each copy clears old data on target changes, runs one request at a time and discards stale
 replies. All trail, PR and CI logic remains in `cairn show --pane ... --json`;
 GitHub cache expiry and background refresh work as usual. PR links open only validated
-GitHub HTTPS URLs. The floating panel is read-only; use the CLI to edit trails.
+GitHub HTTPS URLs. The native panel is read-only; use the CLI to edit trails.
 
 For remote terminals, the mod runs `cairn` through Herdr's `exec` on that machine,
 using its local terminal address and core ID. Install current cairn, `hc` and authenticated
 `gh` there; the remote `cairn` must be on `PATH`. It reads that machine's cairn state,
 never the local machine's. Missing cwd means no folder fallback. When tmux or herdr TUI
-runs inside Herdr.app, cairn records only the inner pane; the native floating panel can then
+runs inside Herdr.app, cairn records only the inner pane; the native panel can then
 find a trail only through the terminal's folder, unless that outer terminal has its
 own mapping. It does not write inner/outer pane links.
 
