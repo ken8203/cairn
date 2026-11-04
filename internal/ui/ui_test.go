@@ -138,6 +138,21 @@ func TestListCountsSessions(t *testing.T) {
 	}
 }
 
+func TestRenderLinksRefOnly(t *testing.T) {
+	base, stacked := "https://github.com/o/r/pull/1", "https://github.com/o/r/pull/2"
+	a := newApp(t, map[string]github.PR{
+		base:    {Number: 1, State: "OPEN", Head: "api"},
+		stacked: {Number: 2, State: "OPEN", Base: "api"},
+	})
+	writeTrail(t, a, "t", "# t\n\n- [ ] o/r#1\n- [ ] o/r#2\n")
+	a.Sessions.Bind("s1", "t")
+	line := render(a.gather(a.Find("s1", "", ""), false), 0).lines[3]
+	want := "└ \x1b]8;;" + stacked + "\x1b\\\x1b[34;4mr#2\x1b[24;39m\x1b]8;;\x1b\\"
+	if !strings.Contains(line, want) {
+		t.Errorf("got %q, want it to contain %q", line, want)
+	}
+}
+
 func TestRenderWideTitles(t *testing.T) {
 	url := "https://github.com/o/r/pull/1"
 	a := newApp(t, map[string]github.PR{url: {Number: 1, State: "OPEN", CI: "none", Title: strings.Repeat("修正登入流程", 10)}})
