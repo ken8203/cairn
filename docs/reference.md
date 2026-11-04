@@ -275,7 +275,7 @@ This customization happens on Dock, not during setup. Setup never edits layouts 
 The mod does not write `.state/` files.
 
 The selected mode is saved with Herdr's `shared` API under `cairn.mode`; `cairn.target`
-passes the last complete terminal target between copies. These runtime choices are
+stores the source terminal, source tab metadata, presentation and open version between copies. These runtime choices are
 separate from installed assets and do not create setup ownership conflicts.
 
 The Cairn toolbar button, `cairn panel` and the `mod.open:cairn` keybinding toggle the
@@ -302,15 +302,30 @@ editing and ticking steps stay in the CLI.
 
 Without mod files or a reachable app, `cairn panel` falls back to the `hc` TUI panel.
 A failed native command or unreadable/malformed layout during close is reported as an
-error. The native panel always follows focus, including when `panel` was invoked with
-an explicit key; it does not bind or mutate that target's session.
+error. In the native panel, `cairn panel [key]` uses the app's selected terminal at
+opening, even with an explicit key. The key still selects the host/fallback; the native
+mod does not bind or mutate that target's session.
 
-Both modes show the focused terminal (including a `terminal.show` replacement),
-retain the complete target when the mod gets focus or switches modes, and poll every three seconds.
-The header shows the terminal's name (or program/title, then `Terminal`), prefixed by
-the machine for remote targets. Hover over it to see the terminal's internal address.
-Each copy clears old data on target changes, runs one request at a time and discards stale
-replies. All trail, PR and CI logic remains in `cairn show --pane ... --json`;
+A fresh open captures the selected terminal (including a `terminal.show` replacement),
+just as Rex Watch fixes its pane key. Changing focus or tabs does not change this source.
+Dock/Float conversions and visible view restoration retain it; closing and reopening
+selects the newly focused terminal. Reloading the panel preserves its source.
+Hidden docks neither query nor adopt incidental focus.
+With no terminal focus on a fresh open, Cairn shows an empty source and asks you to focus
+a terminal and reopen. Only an active presentation or mode handoff restores a saved source;
+a closed target is not a fallback for an unrelated tab.
+
+The header shows the source pane's tab name, including native unnamed labels such as
+`2`, prefixed by the machine for remote targets. Tab moves and renames update live.
+A terminal without a known source tab uses `Terminal`; it never borrows the current tab's label. Hover over
+it to see the terminal address. A missing source shows an unavailable status, without
+adopting another terminal or displaying cached trail data.
+
+Both modes poll every three seconds and resolve the latest agent session through the
+same terminal key. Folder fallback uses that terminal's live cwd; an unknown cwd disables
+folder fallback instead of reusing an old folder. Each copy runs one request at a time
+and discards replies from an older open, folder or unavailable source. All trail, PR
+and CI logic remains in `cairn show --pane ... --json`;
 GitHub cache expiry and background refresh work as usual. PR links open only validated
 GitHub HTTPS URLs. The native panel is read-only; use the CLI to edit trails.
 

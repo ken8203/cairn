@@ -147,6 +147,9 @@ personal layout copy with a **Cairn** button beside the native tabs/Files/Change
 The button toggles the saved mode and stays available when the panel is hidden or floating.
 The original layout and other panels are preserved. Drag the divider to resize;
 Herdr remembers the width and Cairn remembers the mode across restarts.
+The panel keeps the terminal selected when opened, even when you switch tabs or change
+Dock/Float mode. Close and reopen it to select another terminal. The header names its
+source tab; hover for the terminal address.
 
 An explicitly saved Float preference is preserved. Custom tab bars without one visible
 native `tabs` block are refused with an error and a Float action. Escape or `q` closes

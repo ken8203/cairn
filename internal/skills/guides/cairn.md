@@ -72,7 +72,10 @@ Don't create a trail for one-off work with a single PR; the hook records it anyw
 - Sessions are keyed by `$CODEX_THREAD_ID`, else `$CLAUDE_CODE_SESSION_ID`, else the
   terminal pane, so commands you run act on your own session.
 
-- Herdr.app's native panel follows terminal focus and retains its target across Dock/Float.
+- Herdr.app's native panel fixes the selected terminal when opened and retains it across Dock/Float.
+  Focus or tab changes do not retarget it; close and reopen to select another terminal.
+  The header names the source tab. Missing sources stay unavailable; empty focus at a fresh
+  open shows no source. Native `panel [key]` still captures app selection, not the explicit key.
   It needs current cairn on remote machines too. Nested tmux/herdr panes have only
   folder fallback in the outer panel. First open defaults to Dock and creates a personal
   layout copy with a Cairn toggle button beside native tabs. Explicit saved Float is

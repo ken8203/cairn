@@ -1,6 +1,6 @@
 import { View, div } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
-import { closeOverlay, exec, focused, layout, props, run, shared, setShared, terminals, theme } from "herdr";
+import { closeOverlay, exec, focused, layout, panes, props, run, shared, setShared, spaces, terminals, theme } from "herdr";
 import { binary } from "./binary.js";
 import { prepareDock, hideDock, dockVisible } from "./dock.js";
 
@@ -33,9 +33,9 @@ export default class Cairn extends View {
     }
     this.floatOwner = String(Date.now()) + Math.random();
     const saved = shared("cairn.target");
-    this.target = saved ? targetFrom({ terminal: (saved.machine ? saved.machine + "/" : "") + saved.terminal, cwd: saved.cwd }, []) : null;
-    this.handoff = saved?.version;
     this.docked = props()?.cairnMode === "dock";
+    this.target = null;
+    this.handoff = saved?.version;
     this.switching = false;
     this.routed = false;
     this.routing = false;
@@ -48,50 +48,107 @@ export default class Cairn extends View {
     this.handle = cx.focus_handle();
     if (!this.docked && props()?.overlay && shared("cairn.mode") !== "float") {
       // A keybinding opens a short-lived router; it never steals focus or fetches.
-      const focus = focused();
-      this.target = targetFrom(focus, focus?.shown ? terminals() : []) || this.target;
+      if (!dockVisible(layout())) this.captureTarget();
       this.dock(cx, true);
       return;
     }
+    if (saved?.presentation === (this.docked ? "dock" : "float")) {
+      this.target = this.restoreTarget(saved);
+    } else if (!this.docked) {
+      this.captureTarget();
+    }
+    if (!this.docked) this.saveTarget("float");
     this.startView(cx);
   }
 
+  restoreTarget(saved) {
+    const target = targetFrom({ terminal: (saved.machine ? saved.machine + "/" : "") + saved.terminal, cwd: saved.cwd }, []);
+    return target ? { ...target, tab: saved.tab, label: saved.label } : null;
+  }
+
+  captureTarget() {
+    const focus = focused();
+    this.target = targetFrom(focus, focus?.shown ? terminals() : []);
+    if (!this.target) return;
+    const pane = panes().find(p => p.terminal === this.address());
+    this.target.tab = pane?.tab || null;
+    this.updateMetadata();
+  }
+
+  address() {
+    return this.target ? (this.target.machine ? this.target.machine + "/" : "") + this.target.terminal : "";
+  }
+
+  updateMetadata() {
+    if (!this.target) return false;
+    const address = this.address();
+    const terminal = terminals().find(t => t.address === address);
+    const pane = panes().find(p => p.terminal === address);
+    const tab = pane?.tab ?? this.target.tab;
+    const label = spaces().flatMap(s => s.tabs).find(t => t.id === tab)?.name
+      ?? (tab === this.target.tab ? this.target.label : null);
+    const cwd = pane && "cwd" in pane ? (pane.cwd || null)
+      : terminal ? (terminal.foreground?.cwd || terminal.cwd || null) : this.target.cwd;
+    if (cwd === this.target.cwd && tab === this.target.tab && label === this.target.label) return false;
+    this.target = { ...this.target, cwd, tab, label };
+    const saved = shared("cairn.target");
+    if (saved && saved.version === this.handoff && saved.terminal === this.target.terminal && saved.machine === this.target.machine) {
+      setShared("cairn.target", { ...saved, ...this.target });
+    }
+    return true;
+  }
+
+  active() {
+    return !this.closed && !this.routed && !this.routing && !this.switching &&
+      (!this.docked || dockVisible(layout()));
+  }
+
   startView(cx) {
-    this.follow(cx);
     this.refresh(cx);
     if (!this.docked) this.handle.focus();
     cx.timer.every(3000, cx => this.refresh(cx));
   }
 
-  follow(cx) {
-    if (this.docked && shared("cairn.mode") === "dock") this.switching = false;
-    if (this.routed || this.routing || this.switching) return;
-    const focus = focused();
-    let next = targetFrom(focus, focus?.shown ? terminals() : []);
+  syncTarget() {
+    if (this.docked && dockVisible(layout()) && shared("cairn.mode") === "dock") {
+      this.switching = false;
+      this.closed = false;
+    }
+    if (!this.active()) return false;
     const saved = shared("cairn.target");
-    if (saved?.version !== this.handoff) {
+    let changed = false;
+    if (this.docked && saved?.version !== this.handoff) {
       this.handoff = saved?.version;
-      if (!focus?.terminal && !focus?.shown && saved) {
-        next = targetFrom({ terminal: (saved.machine ? saved.machine + "/" : "") + saved.terminal, cwd: saved.cwd }, []);
-      }
-    }
-    if (!next && (focus?.shown || focus?.terminal)) {
-      this.target = null;
+      this.target = saved?.presentation === "dock" ? this.restoreTarget(saved) : null;
       this.data = null;
-      this.error = "Cannot identify this terminal safely.";
-      return;
+      this.error = "";
+      changed = true;
     }
-    // Clicking this mod leaves terminal focus empty; retain the whole last target.
-    if (!next || JSON.stringify(next) === JSON.stringify(this.target)) return;
-    this.target = next;
-    this.data = null;
-    this.error = "";
-    this.refresh(cx);
+    if (this.updateMetadata()) {
+      this.data = null;
+      this.error = "";
+      changed = true;
+    }
+    if (this.target && !terminals().some(t => t.address === this.address())) {
+      this.data = null;
+      this.error = "Source terminal unavailable. Close and reopen Cairn to select another terminal.";
+    }
+    return changed;
   }
 
   refresh(cx) {
-    if (!this.target || this.pending || this.routed || this.routing || this.switching) return;
+    if (!this.active()) return;
+    this.syncTarget();
+    if (!this.target || this.pending) return;
+    const address = this.address();
+    if (!terminals().some(t => t.address === address)) return;
     const target = this.target;
+    const version = this.handoff;
+    const current = () => {
+      this.syncTarget();
+      return this.active() && target === this.target &&
+        version === shared("cairn.target")?.version && terminals().some(t => t.address === address);
+    };
     this.pending = true;
     cx.spawn(async cx => {
       try {
@@ -103,9 +160,9 @@ export default class Cairn extends View {
         if (!data || !Array.isArray(data.prs) || !(data.trail === null || (data.trail && Array.isArray(data.trail.steps) && Array.isArray(data.trail.notes)))) {
           throw new Error("Unexpected cairn JSON; update cairn on the target machine.");
         }
-        if (target === this.target) { this.data = data; this.error = ""; }
+        if (current()) { this.data = data; this.error = ""; }
       } catch (error) {
-        if (target === this.target) { this.data = null; this.error = String(error); }
+        if (current()) { this.data = null; this.error = String(error); }
       } finally {
         this.pending = false;
         if (target !== this.target) this.refresh(cx);
@@ -114,12 +171,23 @@ export default class Cairn extends View {
     });
   }
 
-  saveTarget() {
-    if (this.target) setShared("cairn.target", { ...this.target, version: (shared("cairn.target")?.version || 0) + 1 });
+  saveTarget(presentation) {
+    this.handoff = (shared("cairn.target")?.version || 0) + 1;
+    setShared("cairn.target", { ...this.target, presentation, version: this.handoff });
+  }
+
+  releaseTarget() {
+    const saved = shared("cairn.target");
+    if (saved && saved.version === this.handoff && saved.presentation === (this.docked ? "dock" : "float")) {
+      this.saveTarget(null);
+    }
+    this.target = null;
+    this.data = null;
   }
 
   async close(_cx) {
     this.cancelled = true;
+    if (!this.routed && !this.docked) this.releaseTarget();
     this.clearVisible();
   }
 
@@ -152,14 +220,13 @@ export default class Cairn extends View {
   closePanel() {
     this.clearVisible();
     if (this.switching) this.cancelled = true;
-    this.saveTarget();
+    this.releaseTarget();
     if (this.docked) hideDock();
     else if (props()?.overlay) closeOverlay(props().overlay);
   }
 
   switchMode(cx) {
     if (this.switching || this.routed) return;
-    this.saveTarget();
     if (this.routeFailed) {
       setShared("cairn.mode", "float");
       this.routeFailed = false;
@@ -169,6 +236,7 @@ export default class Cairn extends View {
     }
     if (this.docked) {
       this.switching = true;
+      this.saveTarget("float");
       hideDock();
       setShared("cairn.mode", "float");
       run("mod.open", { name: "cairn" });
@@ -185,7 +253,7 @@ export default class Cairn extends View {
       try {
         const commands = await prepareDock(toggle);
         if (this.cancelled) return;
-        this.saveTarget();
+        this.saveTarget(toggle && dockVisible(layout()) ? null : "dock");
         setShared("cairn.mode", "dock");
         this.clearVisible();
         this.routed = true;
@@ -197,7 +265,7 @@ export default class Cairn extends View {
         this.modeError = String(error);
         this.routeFailed = toggle;
         this.routing = false;
-        if (toggle) this.startView(cx);
+        if (toggle) { this.saveTarget("float"); this.startView(cx); }
         cx.notify();
       }
     });
@@ -242,7 +310,7 @@ export default class Cairn extends View {
     if (this.toolbarMode) return this.toolbar();
     if (this.routed || this.routing) return div();
     this.acknowledgeFloat();
-    this.follow(cx);
+    if (this.syncTarget()) this.refresh(cx);
     const colors = theme();
     const root = v_flex().size_full().min_h(0).p(this.docked ? 12 : 20).gap(14).bg(colors.background)
       .text_color(colors.foreground).font_family("JetBrains Mono").text_size(13)
@@ -251,9 +319,8 @@ export default class Cairn extends View {
     if (this.docked) root.rounded(10).border(1)
       .border_color(this.handle.is_focused() ? colors.accent : colors.border).overflow_hidden();
     const target = this.target;
-    const address = target ? (target.machine ? target.machine + "/" : "") + target.terminal : "";
-    const terminal = target ? terminals().find(t => t.address === address) : null;
-    const name = terminal?.name || terminal?.program?.name || terminal?.title || "Terminal";
+    const address = this.address();
+    const name = target?.label || "Terminal";
     const header = h_flex().min_w(0).items_center().gap(12).flex_shrink_0().text_color(colors.muted);
     header.child(div().flex_shrink_0().child("cairn"));
     header.child(div().id("target").flex_1().min_w(0).truncate().tooltip(address)
@@ -272,7 +339,7 @@ export default class Cairn extends View {
       root.child(body).child(div().flex_shrink_0().text_color(colors.dim).text_size(11).child(this.docked ? "PR ↗ · r refresh · q/esc close" : "click PR to open · r refresh · q / esc close"));
       return this.docked ? div().size_full().pl(8).child(root) : root;
     };
-    if (!target) { body.child(div().text_color(colors.muted).child(this.error || "Focus a terminal to see its trail.")); return finish(); }
+    if (!target) { body.child(div().text_color(colors.muted).child(this.error || "No source terminal. Focus a terminal, then close and reopen Cairn.")); return finish(); }
     if (this.error) { body.child(div().text_color(colors.blocked).child(this.error)); return finish(); }
     if (!this.data) { body.child(div().text_color(colors.muted).child("Loading trail…")); return finish(); }
     const trail = this.data.trail;

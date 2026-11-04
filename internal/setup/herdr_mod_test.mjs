@@ -23,9 +23,9 @@ const layoutFixture = () => ({ id: 'root', type: 'row', theme: 'graphite', child
 ] });
 
 function runtime(tree = layoutFixture()) {
-  const rt = { shared: { layout: 'main', 'cairn.mode': 'float' }, trees: { main: copy(tree) }, builtins: new Set(['main']),
+  const rt = { shared: { layout: 'main', 'cairn.mode': 'float' }, trees: { main: copy(tree) },
     disk: { '/app/layouts/main.json': JSON.stringify(tree) }, queue: [], events: [], errors: [],
-    commands: [], overlays: new Set(['mod-cairn', 'unrelated']), closed: [], focus: null, keyboard: null };
+    terminals: [{ address: 't1', cwd: '/api' }, { address: 'vps/t2', cwd: '/remote/repo' }], panes: [{ terminal: 't1', tab: 'tb1' }, { terminal: 'vps/t2', tab: 'vps/tb2' }], spaces: [{ tabs: [{ id: 'tb1', name: 'cairn-preview' }, { id: 'vps/tb2', name: '2' }] }], commands: [], overlays: new Set(['mod-cairn', 'unrelated']), closed: [], focus: null, keyboard: null };
   rt.flush = () => {
     for (const { name, args } of rt.queue.splice(0)) {
       if (name === 'layout.switch') {
@@ -34,17 +34,6 @@ function runtime(tree = layoutFixture()) {
         rt.trees[args.name] = JSON.parse(text);
         rt.shared.layout = args.name;
         rt.overlays.clear();
-      } else if (name === 'layout.clone') {
-        const path = '/app/layouts/' + args.as + '.json';
-        if (path in rt.disk) { rt.errors.push('clone collision'); continue; }
-        rt.trees[args.as] = copy(rt.trees[args.name]);
-        rt.disk[path] = JSON.stringify(rt.trees[args.as]);
-        rt.shared.layout = args.as;
-        rt.overlays.clear();
-      } else if (name === 'layout.set') {
-        if (rt.builtins.has(rt.shared.layout)) { rt.errors.push('shipped layout'); continue; }
-        rt.trees[rt.shared.layout] = copy(args.layout);
-        rt.disk['/app/layouts/' + rt.shared.layout + '.json'] = JSON.stringify(args.layout);
       } else if (['layout.show', 'layout.hide', 'layout.toggle'].includes(name)) {
         const node = findNode(rt.trees[rt.shared.layout], args.id);
         if (!node) { rt.errors.push('missing node'); continue; }
@@ -87,8 +76,9 @@ function element(kind) {
 function harness(rt, viewProps = { overlay: 'mod-cairn' }) {
   const fresh = !rt;
   rt ||= runtime();
+  if (fresh) rt.focus = { terminal: 't1', cwd: '/api', space: 'local' };
   const requests = [], tasks = [], timers = [];
-  let terminalReads = 0, focusCalls = 0;
+  let focusCalls = 0;
   let api;
   const sandbox = {
     View: class {}, binary: '/opt/my bin/cairn',
@@ -97,7 +87,7 @@ function harness(rt, viewProps = { overlay: 'mod-cairn' }) {
     props: () => viewProps,
     closeOverlay: id => { rt.closed.push(id); rt.overlays.delete(id); },
     shared: key => copy(rt.shared[key]), setShared: (key, value) => { rt.shared[key] = copy(value); },
-    layout: () => copy(rt.trees[rt.shared.layout]), layouts: () => Object.keys(rt.trees),
+    layout: () => copy(rt.trees[rt.shared.layout]),
     appHome: () => '/app',
     async readTextFile(path) {
       rt.events.push({ kind: 'read', path });
@@ -119,7 +109,8 @@ function harness(rt, viewProps = { overlay: 'mod-cairn' }) {
       rt.events.push({ kind: 'queue', name });
     },
     focused: () => rt.focus,
-    terminals: () => { terminalReads++; return [{ address: 'vps/t2', cwd: '/remote/repo' }]; },
+    terminals: () => rt.terminals,
+    panes: () => rt.panes, spaces: () => rt.spaces,
     exec: (cmd, args, options) => new Promise((resolve, reject) => requests.push({ cmd, args, options, resolve, reject })),
   };
   runInNewContext(source, sandbox);
@@ -129,9 +120,17 @@ function harness(rt, viewProps = { overlay: 'mod-cairn' }) {
     notify() {}, spawn(fn) { const task = fn(cx); tasks.push(task); } };
   const mod = new api.Cairn();
   mod.init({}, cx);
-  if (fresh) rt.focus = { terminal: 't1', cwd: '/api', space: 'local' };
   return { ...api, mod, cx, rt, requests, tasks, closed: rt.closed, timers,
-    focusCalls: () => focusCalls, terminalReads: () => terminalReads, focus: f => { rt.focus = f; } };
+    focusCalls: () => focusCalls, focus: f => { rt.focus = f; } };
+}
+function openAt(focus) {
+  const rt = runtime();
+  rt.focus = focus;
+  if (focus?.terminal) {
+    rt.terminals = rt.terminals.filter(t => t.address !== focus.terminal);
+    rt.terminals.push({ address: focus.terminal, cwd: focus.cwd });
+  }
+  return harness(rt);
 }
 function findNode(tree, id) {
   if (tree.id === id) return tree;
@@ -141,7 +140,7 @@ const empty = { code: 0, stdout: '{"trail":null,"prs":[]}', stderr: '' };
 
 test('floating panel closes only itself and refresh ignores modified keys', async () => {
   const h = harness();
-  h.mod.follow(h.cx); h.requests[0].resolve(empty); await h.tasks[0];
+  h.mod.syncTarget(); h.requests[0].resolve(empty); await h.tasks[0];
   h.mod.key({ keystroke: 'cmd+r' }, h.cx);
   assert.equal(h.requests.length, 1);
   h.mod.key({ keystroke: 'r' }, h.cx);
@@ -154,50 +153,38 @@ test('floating panel closes only itself and refresh ignores modified keys', asyn
   assert.deepEqual(h.closed, ['mod-cairn', 'mod-cairn']);
 });
 
-test('serial requests discard stale replies and retain the complete last target on mod focus', async () => {
+test('focus changes retain the opening source and latest refresh, including mod focus', async () => {
   const h = harness();
-  h.mod.follow(h.cx);
-  assert.equal(h.requests.length, 1);
-  assert.equal(h.requests[0].cmd, '/opt/my bin/cairn');
   h.focus({ terminal: 'vps/t2', cwd: '/remote/repo', space: 'vps/space' });
-  h.mod.follow(h.cx);
-  h.mod.refresh(h.cx);
+  h.mod.syncTarget();
   assert.equal(h.requests.length, 1);
-  assert.equal(h.mod.data, null);
-  h.requests[0].resolve({ ...empty, stdout: '{"trail":null,"prs":[{"ref":"stale"}]}' });
-  await h.tasks[0];
-  assert.equal(h.requests.length, 2);
-  assert.equal(h.mod.data, null);
-  assert.equal(h.requests[1].cmd, 'cairn');
-  assert.equal(h.requests[1].options.on, 'vps');
-  assert.deepEqual(Array.from(h.requests[1].args), ['show', '--pane', 'hc-t2', '--json', '--dir', '/remote/repo']);
-  h.focus({ terminal: null, shown: null, space: 'local' });
-  h.mod.follow(h.cx);
-  assert.equal(h.mod.target.machine, 'vps');
-  assert.equal(h.mod.target.cwd, '/remote/repo');
-  h.requests[1].resolve(empty);
+  assert.equal(h.mod.target.terminal, 't1');
+  h.requests[0].resolve(empty); await h.tasks[0];
+  h.mod.refresh(h.cx);
+  assert.equal(h.requests[1].cmd, '/opt/my bin/cairn');
+  assert.equal(h.requests[1].args[2], 'hc-t1');
+  h.focus(null); h.mod.syncTarget();
+  assert.equal(h.mod.target.cwd, '/api');
+  h.requests[1].resolve({ ...empty, stdout: '{"trail":null,"prs":[{"ref":"latest session"}]}' });
   await h.tasks[1];
-  assert.equal(h.mod.data.prs.length, 0);
-  assert.equal(h.mod.error, '');
+  assert.equal(h.mod.data.prs[0].ref, 'latest session');
 });
 
-test('a new target clears data immediately, never borrows cwd, and errors can recover', async () => {
-  const h = harness();
-  h.mod.follow(h.cx); h.requests[0].resolve(empty); await h.tasks[0];
-  h.focus({ terminal: 't3', cwd: null, space: 'local' });
-  h.mod.follow(h.cx);
-  assert.equal(h.mod.data, null);
-  assert.deepEqual(Array.from(h.requests[1].args), ['show', '--pane', 'hc-t3', '--json']);
-  h.requests[1].reject(new Error('offline')); await h.tasks[1];
+test('close and fresh open select B without borrowing cwd, and errors recover', async () => {
+  const first = harness();
+  first.mod.closePanel();
+  first.focus({ terminal: 't3', cwd: null });
+  first.rt.terminals.push({ address: 't3' });
+  const h = harness(first.rt);
+  assert.deepEqual(Array.from(h.requests[0].args), ['show', '--pane', 'hc-t3', '--json']);
+  h.requests[0].reject(new Error('offline')); await h.tasks[0];
   assert.match(h.mod.error, /offline/);
-  h.mod.refresh(h.cx); h.requests[2].resolve(empty); await h.tasks[2];
+  h.mod.refresh(h.cx); h.requests[1].resolve(empty); await h.tasks[1];
   assert.equal(h.mod.error, '');
-  assert.ok(h.mod.data);
-  h.focus({ terminal: 'vps//t1', cwd: '/remote', space: 'vps/space' });
-  h.mod.follow(h.cx);
-  assert.equal(h.mod.target, null);
-  assert.equal(h.mod.data, null);
-  assert.equal(h.requests.length, 3);
+  first.requests[0].resolve({ ...empty, stdout: '{"trail":null,"prs":[{"ref":"stale"}]}' });
+  await first.tasks[0];
+  assert.equal(first.mod.data, null);
+  assert.equal(h.mod.data.prs.length, 0);
 });
 
 test('shown terminals use their own machine and cwd; unsafe links are inert', () => {
@@ -209,52 +196,42 @@ test('shown terminals use their own machine and cwd; unsafe links are inert', ()
   for (const url of ['http://github.com/acme/api/pull/1', 'https://github.com.evil/acme/api/pull/1', 'https://github.com@evil/acme/api/pull/1', 'javascript:alert(1)', 'https://github.com/acme/api/pull/1\n', 'https://github.com/acme/api/pull/1?x=1']) assert.equal(h.githubURL(url), false, url);
 });
 
-test('local terminal blocks in remote window context query locally without listing terminals', async () => {
-  const h = harness();
-  h.focus({ terminal: 't1', cwd: '/local/repo', space: 'vps/space' });
-  h.mod.follow(h.cx);
+test('local terminal blocks in remote window context query locally without borrowing remote context', async () => {
+  const h = openAt({ terminal: 't1', cwd: '/local/repo', space: 'vps/space' });
+  h.mod.syncTarget();
   assert.equal(h.requests.length, 1);
   assert.equal(h.requests[0].cmd, '/opt/my bin/cairn');
   assert.equal(h.requests[0].options.on, null);
   assert.deepEqual(Array.from(h.requests[0].args), ['show', '--pane', 'hc-t1', '--json', '--dir', '/local/repo']);
-  assert.equal(h.terminalReads(), 0);
+
   h.requests[0].resolve(empty); await h.tasks[0];
 });
 
-test('switching A to B to A keeps the first A response stale', async () => {
+test('same target reopened gets a new version and rejects the old pending response', async () => {
   const h = harness();
-  h.mod.follow(h.cx);
-  const first = h.mod.target;
-  h.mod.follow(h.cx);
-  assert.equal(h.mod.target, first);
-  h.focus({ terminal: 'vps/t9z', cwd: '/remote/repo', space: 'vps/space' });
-  h.mod.follow(h.cx);
-  h.focus({ terminal: 't1', cwd: '/api', space: 'local' });
-  h.mod.follow(h.cx);
-  assert.notEqual(h.mod.target, first);
-  assert.equal(h.requests.length, 1);
+  const version = h.rt.shared['cairn.target'].version;
+  await h.mod.close(h.cx);
+  const reopened = harness(h.rt);
+  assert.notEqual(h.rt.shared['cairn.target'].version, version);
   h.requests[0].resolve({ ...empty, stdout: '{"trail":null,"prs":[{"ref":"stale A"}]}' });
   await h.tasks[0];
   assert.equal(h.mod.data, null);
-  assert.equal(h.requests.length, 2);
-  h.requests[1].resolve(empty); await h.tasks[1];
-  assert.equal(h.mod.data.prs.length, 0);
+  reopened.requests[0].resolve(empty); await reopened.tasks[0];
+  assert.equal(reopened.mod.data.prs.length, 0);
 });
 
 test('core address alphabet and malformed remote addresses', async () => {
   for (const address of ['t19', 't1b', 't1z', 't20', 't9z', 'vps/t1b', 'vps/t9z']) {
-    const h = harness();
-    h.focus({ terminal: address, cwd: '/repo', space: 'local' });
-    h.mod.follow(h.cx);
+    const h = openAt({ terminal: address, cwd: '/repo', space: 'local' });
+    h.mod.syncTarget();
     assert.equal(h.requests.length, 1, address);
     assert.equal(h.requests[0].options.on, address.includes('/') ? 'vps' : null);
     assert.equal(h.requests[0].args[2], 'hc-' + address.split('/').at(-1));
     h.requests[0].resolve(empty); await h.tasks[0];
   }
   for (const address of ['t1a', 't1e', 't1i', 't1l', 't1o', 't1u', 'tb1', 't01', '/t1b', 'vps//t9z', 'vps/t1b/extra', 'vps/']) {
-    const h = harness();
-    h.focus({ terminal: address, cwd: '/repo' });
-    h.mod.follow(h.cx);
+    const h = openAt({ terminal: address, cwd: '/repo' });
+    h.mod.syncTarget();
     assert.equal(h.mod.target, null, address);
     assert.equal(h.requests.length, 0, address);
   }
@@ -266,7 +243,7 @@ test('Dock wraps only the active terminal and preserves other panels, with colli
   tree.children.push({ id: 'cairn-dock', type: 'block', content: { mod: 'other' } });
   tree.children.push({ id: 'cairn-work', type: 'block', content: { mod: 'another' } });
   const original = copy(tree);
-  const plan = h.dockPlan(tree, 'main', ['main', 'main-cairn', 'main-cairn-2']);
+  const plan = h.dockPlan(tree);
   assert.deepEqual(tree, original);
   assert.equal(plan.id, 'cairn-dock-2');
   const next = copy(plan.layout);
@@ -284,10 +261,9 @@ test('Dock wraps only the active terminal and preserves other panels, with colli
 });
 
 test('floating → dock → float retains target, avoids focus stealing and prevents duplicate transitions', async () => {
-  const h = harness();
-  h.focus({ terminal: 'vps/t2', cwd: '/remote/repo', space: 'vps/space' });
-  h.mod.follow(h.cx);
-  h.focus(null); // Clicking the panel gives no terminal focus.
+  const h = openAt({ terminal: 'vps/t2', cwd: '/remote/repo', space: 'vps/space' });
+  h.mod.syncTarget();
+  h.focus({ terminal: 't1', cwd: '/api' }); // A mode switch must ignore another focused terminal.
   const original = copy(h.rt.trees.main);
   h.mod.switchMode(h.cx);
   h.mod.switchMode(h.cx);
@@ -322,7 +298,7 @@ test('floating → dock → float retains target, avoids focus stealing and prev
 
 test('saved dock mode routes reopen to show/hide, preserving dimensions across copies and restart', async () => {
   const h = harness();
-  h.mod.follow(h.cx); h.focus(null); h.mod.switchMode(h.cx);
+  h.mod.syncTarget(); h.focus(null); h.mod.switchMode(h.cx);
   await settle(h);
   const node = h.dockNode(h.rt.trees[h.rt.shared.layout]);
   node.size.px = 517; // Native divider state as exposed by effective layout().
@@ -416,18 +392,21 @@ test('docked keyboard actions only run with panel focus and close only the dock'
 
 test('a reused hidden dock accepts the complete target handed off from floating', async () => {
   const h = harness();
-  h.mod.follow(h.cx); h.focus(null); h.mod.switchMode(h.cx);
+  h.mod.syncTarget(); h.focus(null); h.mod.switchMode(h.cx);
   await settle(h);
   const dock = harness(h.rt, { cairnMode: 'dock' });
   assert.equal(dock.mod.target.terminal, 't1');
   dock.mod.switchMode(dock.cx);
   await settle(dock);
+  const handoff = harness(h.rt);
+  handoff.mod.closePanel();
+  h.focus({ terminal: 'vps/t2', cwd: '/other', space: 'vps/space' });
+  h.rt.terminals.find(t => t.address === 'vps/t2').cwd = '/other';
   const floating = harness(h.rt);
-  floating.focus({ terminal: 'vps/t2', cwd: '/other', space: 'vps/space' });
-  floating.mod.follow(floating.cx); floating.focus(null);
+  floating.mod.syncTarget(); floating.focus(null);
   floating.mod.switchMode(floating.cx);
   await settle(floating);
-  dock.mod.follow(dock.cx);
+  dock.mod.render(dock.cx);
   assert.equal(dock.mod.target.terminal, 't2');
   assert.equal(dock.mod.target.machine, 'vps');
   assert.equal(dock.mod.target.cwd, '/other');
@@ -449,7 +428,8 @@ test('compact renders respect single-use elements in floating and dock modes and
   const data = { trail: { name: 'work', done: 0, total: 2, steps: [pr, { n: 2, kind: 'text', text: 'release' }], notes: ['a note'] }, prs: [pr] };
   for (const docked of [false, true]) {
     h.mod.docked = docked;
-    h.mod.follow(h.cx);
+    if (docked) h.rt.trees.main = h.dockPlan(h.rt.trees.main).layout;
+    h.mod.syncTarget();
     for (const state of ['loading', 'error', 'empty', 'data']) {
       h.mod.error = state === 'error' ? 'offline' : '';
       h.mod.data = state === 'loading' ? null : state === 'empty' ? { trail: null, prs: [] } : data;
@@ -469,10 +449,10 @@ test('hidden active-tab content is not chosen as a docking location', () => {
   const h = harness();
   const hidden = { id: 'hidden', type: 'block', hidden: true, content: { tab: 'active' } };
   const tree = layoutFixture(); tree.children.push(hidden);
-  const plan = h.dockPlan(tree, 'main', ['main']);
+  const plan = h.dockPlan(tree);
   assert.deepEqual(copy(plan.layout.children.at(-1)), hidden);
   assert.equal(h.dockNode(plan.layout).id, plan.id);
-  assert.throws(() => h.dockPlan({ type: 'row', children: [hidden] }, 'main', []), /no active-tab block/);
+  assert.throws(() => h.dockPlan({ type: 'row', children: [hidden] }), /no active-tab block/);
 });
 
 function deferred() {
@@ -566,6 +546,7 @@ test('pending router does not focus or fetch; failed creation becomes a usable f
   const gate = deferred();
   rt.shared['cairn.mode'] = 'dock';
   rt.focus = { terminal: 't1b', cwd: '/repo' };
+  rt.terminals.push({ address: 't1b', cwd: '/repo' });
   rt.beforeWrite = async () => { await gate.promise; throw new Error('disk full'); };
   const h = harness(rt);
   await settle(h);
@@ -657,8 +638,8 @@ test('stack falls back to first visible child when active is missing, stale or h
 });
 
 test('long target and trail names can shrink without displacing dock controls or progress', () => {
-  const h = harness(); h.mod.docked = true;
-  h.focus({ terminal: 'very-long-remote-machine-name/t1', cwd: '/repo' }); h.mod.follow(h.cx);
+  const h = openAt({ terminal: 'very-long-remote-machine-name/t1', cwd: '/repo' }); h.mod.docked = true;
+  h.rt.trees.main = h.dockPlan(h.rt.trees.main).layout;
   h.mod.data = { trail: { name: 'a very long trail name', done: 0, total: 1, steps: [], notes: [] }, prs: [] };
   const root = h.mod.render(h.cx).nodes[0];
   const header = root.nodes[0];
@@ -808,4 +789,231 @@ test('toolbar reopen reveals a reused dock behind a hidden ancestor and inactive
   assert.equal(toolbarButton(toolbar).attrs.bg[0], 'selected');
   assert.equal(rt.commands.some(c => c.name === 'layout.switch' || c.name === 'layout.set'), false);
   assert.equal(router.requests.length, 0); assert.equal(router.focusCalls(), 0);
+});
+
+test('source tab labels stay fixed, rename live, and preserve unnamed remote labels on handoff', async () => {
+  const h = harness();
+  const header = h.mod.render(h.cx).nodes[0].nodes[1];
+  assert.equal(header.nodes[0], 'cairn-preview');
+  assert.deepEqual(header.attrs.tooltip, ['t1']);
+  h.focus({ terminal: 'vps/t2', tab: 'vps/tb2', cwd: '/remote/repo' });
+  h.rt.spaces[0].tabs[0].name = 'renamed';
+  assert.equal(h.mod.render(h.cx).nodes[0].nodes[1].nodes[0], 'renamed');
+  h.mod.switchMode(h.cx); await settle(h);
+  const dock = harness(h.rt, { cairnMode: 'dock' });
+  assert.equal(dock.mod.target.tab, 'tb1');
+  assert.equal(dock.mod.target.label, 'renamed');
+  dock.mod.closePanel(); await settle(dock);
+  const router = harness(h.rt); await settle(router);
+  dock.mod.render(dock.cx);
+  assert.equal(dock.mod.target.tab, 'vps/tb2');
+  const remoteHeader = dock.mod.render(dock.cx).nodes[0].nodes[0].nodes[1];
+  assert.equal(remoteHeader.nodes[0], 'vps/2');
+  assert.deepEqual(remoteHeader.attrs.tooltip, ['vps/t2']);
+  dock.mod.switchMode(dock.cx); await settle(dock);
+  const float = harness(h.rt);
+  assert.equal(float.mod.target.label, '2');
+  assert.equal(float.mod.target.machine, 'vps');
+});
+
+test('hidden persistent dock does not fetch or adopt focus and toolbar reopen selects B', async () => {
+  const h = harness(); h.mod.switchMode(h.cx); await settle(h);
+  const dock = harness(h.rt, { cairnMode: 'dock' });
+  dock.requests[0].resolve(empty); await dock.tasks[0];
+  dock.mod.closePanel(); await settle(dock);
+  const before = copy(h.rt.shared['cairn.target']);
+  h.focus({ terminal: 'vps/t2', cwd: '/remote/repo' });
+  dock.mod.render(dock.cx); dock.timers[0](dock.cx);
+  assert.equal(dock.requests.length, 1);
+  assert.deepEqual(h.rt.shared['cairn.target'], before);
+  const toolbar = harness(h.rt, { cairnMode: 'toolbar' });
+  toolbarButton(toolbar).attrs.on_click[0](); await settle(toolbar);
+  const router = harness(h.rt); await settle(router);
+  dock.mod.render(dock.cx);
+  assert.equal(dock.mod.target.terminal, 't2');
+  assert.equal(dock.requests[1].options.on, 'vps');
+  dock.requests[1].resolve(empty); await dock.tasks[1];
+});
+
+test('external dock hide (CLI close) followed by mod.open captures a fresh source', async () => {
+  const h = harness(); h.mod.switchMode(h.cx); await settle(h);
+  const dock = harness(h.rt, { cairnMode: 'dock' });
+  h.rt.queue.push({ name: 'layout.hide', args: { id: h.dockNode(h.rt.trees[h.rt.shared.layout]).id } });
+  h.rt.flush();
+  h.focus({ terminal: 'vps/t2', cwd: '/remote/repo' });
+  dock.timers[0](dock.cx);
+  assert.equal(dock.requests.length, 1);
+  const router = harness(h.rt); await settle(router);
+  dock.mod.render(dock.cx);
+  dock.requests[0].resolve({ ...empty, stdout: '{"trail":null,"prs":[{"ref":"old"}]}' });
+  await dock.tasks[0];
+  assert.equal(dock.mod.data, null);
+  assert.equal(dock.requests[1].options.on, 'vps');
+  dock.requests[1].resolve(empty); await dock.tasks[1];
+  assert.equal(dock.mod.data.prs.length, 0);
+});
+
+test('visible views restore the source on reload even with B focused', async () => {
+  for (const docked of [false, true]) {
+    const h = harness();
+    if (docked) { h.mod.switchMode(h.cx); await settle(h); }
+    h.focus({ terminal: 'vps/t2', cwd: '/remote/repo' });
+    const reloaded = harness(h.rt, docked ? { cairnMode: 'dock' } : { overlay: 'mod-cairn' });
+    assert.equal(reloaded.mod.target.terminal, 't1');
+    assert.equal(reloaded.mod.target.label, 'cairn-preview');
+    assert.equal(reloaded.requests[0].args[2], 'hc-t1');
+  }
+});
+
+test('missing source clears cached data, rejects pending data and never follows another terminal', async () => {
+  const h = harness();
+  h.requests[0].resolve(empty); await h.tasks[0];
+  h.mod.refresh(h.cx);
+  h.rt.terminals = h.rt.terminals.filter(t => t.address !== 't1');
+  h.rt.panes = h.rt.panes.filter(p => p.terminal !== 't1');
+  h.focus({ terminal: 'vps/t2', cwd: '/remote/repo' });
+  h.mod.render(h.cx);
+  assert.equal(h.mod.data, null);
+  assert.match(h.mod.error, /Source terminal unavailable/);
+  h.requests[1].resolve({ ...empty, stdout: '{"trail":null,"prs":[{"ref":"stale"}]}' });
+  await h.tasks[1]; h.mod.refresh(h.cx);
+  assert.equal(h.mod.data, null);
+  assert.equal(h.requests.length, 2);
+  assert.equal(h.mod.target.terminal, 't1');
+  h.rt.terminals.push({ address: 't1', cwd: '/api' });
+  h.mod.refresh(h.cx); h.requests[2].resolve(empty); await h.tasks[2];
+  assert.equal(h.mod.error, '');
+});
+
+test('fresh empty focus never revives a closed source or adopts later focus', async () => {
+  const h = harness(); await h.mod.close(h.cx);
+  h.focus(null);
+  const reopened = harness(h.rt);
+  assert.equal(reopened.mod.target, null);
+  reopened.focus({ terminal: 'vps/t2', cwd: '/remote/repo' });
+  reopened.mod.render(reopened.cx); reopened.mod.refresh(reopened.cx);
+  assert.equal(reopened.mod.target, null);
+  assert.equal(reopened.requests.length, 0);
+});
+
+test('layout terminal without a source pane never borrows the focused tab label', () => {
+  const h = openAt({ terminal: 't3', tab: 'vps/tb2', cwd: '/local/repo' });
+  assert.equal(h.mod.target.tab, null);
+  const header = h.mod.render(h.cx).nodes[0].nodes[1];
+  assert.equal(header.nodes[0], 'Terminal');
+  assert.deepEqual(header.attrs.tooltip, ['t3']);
+});
+
+test('old floating teardown after replacement cannot clear the restored source', async () => {
+  const h = harness();
+  h.focus({ terminal: 'vps/t2', cwd: '/remote/repo' });
+  const replacement = harness(h.rt);
+  const version = h.rt.shared['cairn.target'].version;
+  await h.mod.close(h.cx);
+  assert.equal(h.rt.shared['cairn.target'].version, version);
+  assert.equal(h.rt.shared['cairn.target'].presentation, 'float');
+  replacement.requests[0].resolve(empty); await replacement.tasks[0];
+  assert.equal(replacement.mod.target.terminal, 't1');
+  assert.ok(replacement.mod.data);
+});
+
+test('fixed source follows live cwd and discards pending results from the old folder', async () => {
+  const h = harness();
+  const original = h.mod.target;
+  h.focus({ terminal: 'vps/t2', cwd: '/wrong' });
+  h.rt.terminals.find(t => t.address === 't1').cwd = '/web';
+  h.mod.refresh(h.cx);
+  assert.notEqual(h.mod.target, original);
+  assert.equal(original.cwd, '/api');
+  assert.equal(h.requests.length, 1);
+  h.requests[0].resolve({ ...empty, stdout: '{"trail":null,"prs":[{"ref":"old folder"}]}' });
+  await h.tasks[0];
+  assert.equal(h.mod.data, null);
+  assert.deepEqual(Array.from(h.requests[1].args), ['show', '--pane', 'hc-t1', '--json', '--dir', '/web']);
+  assert.equal(h.requests[1].options.on, null);
+  assert.equal(h.rt.shared['cairn.target'].cwd, '/web');
+  h.requests[1].resolve(empty); await h.tasks[1];
+  assert.ok(h.mod.data);
+});
+
+test('source pane live cwd takes precedence over the terminal startup directory', async () => {
+  const rt = runtime();
+  rt.focus = { terminal: 't1', cwd: '/current' };
+  rt.panes[0].cwd = '/current';
+  rt.terminals[0].cwd = '/startup';
+  const h = harness(rt);
+  assert.equal(h.requests[0].args.at(-1), '/current');
+  h.focus({ terminal: 'vps/t2', cwd: '/wrong' });
+  rt.panes[0].cwd = '/next';
+  h.requests[0].resolve(empty); await h.tasks[0];
+  assert.equal(h.mod.data, null);
+  assert.equal(h.requests[1].args.at(-1), '/next');
+  h.requests[1].resolve(empty); await h.tasks[1];
+  rt.panes[0].cwd = null;
+  h.mod.refresh(h.cx);
+  assert.equal(h.requests[2].args.includes('--dir'), false);
+});
+
+test('a source without a pane uses its foreground cwd before its startup directory', () => {
+  const rt = runtime();
+  rt.focus = { terminal: 'vps/t2', cwd: '/current' };
+  rt.panes = [];
+  rt.terminals[1].foreground = { cwd: '/current' };
+  const h = harness(rt);
+  assert.equal(h.requests[0].args.at(-1), '/current');
+  assert.equal(h.requests[0].options.on, 'vps');
+});
+
+test('cwd changes before a reply are detected without a render or timer tick', async () => {
+  const h = harness();
+  h.rt.terminals.find(t => t.address === 't1').cwd = '/web';
+  h.requests[0].resolve({ ...empty, stdout: '{"trail":null,"prs":[{"ref":"old folder"}]}' });
+  await h.tasks[0];
+  assert.equal(h.mod.data, null);
+  assert.equal(h.requests[1].args.at(-1), '/web');
+  h.requests[1].resolve(empty); await h.tasks[1];
+  assert.ok(h.mod.data);
+});
+
+test('null or unknown live cwd disables stale folder fallback, including remote sources', async () => {
+  for (const cwd of [null, undefined, '']) {
+    const h = openAt({ terminal: 'vps/t2', cwd: '/remote/repo' });
+    h.requests[0].resolve(empty); await h.tasks[0];
+    h.focus({ terminal: 't1', cwd: '/wrong' });
+    h.rt.terminals.find(t => t.address === 'vps/t2').cwd = cwd;
+    h.mod.refresh(h.cx);
+    assert.equal(h.mod.data, null);
+    assert.equal(h.mod.target.cwd, null);
+    assert.equal(h.rt.shared['cairn.target'].cwd, null);
+    assert.deepEqual(Array.from(h.requests[1].args), ['show', '--pane', 'hc-t2', '--json']);
+    assert.equal(h.requests[1].options.on, 'vps');
+    h.requests[1].resolve(empty); await h.tasks[1];
+  }
+});
+
+test('fixed remote source follows tab moves and renames without borrowing current tab metadata', async () => {
+  const h = openAt({ terminal: 'vps/t2', cwd: '/remote/repo' });
+  h.focus({ terminal: 't1', tab: 'tb1', cwd: '/api' });
+  h.rt.panes = h.rt.panes.filter(p => p.terminal !== 'vps/t2');
+  h.mod.render(h.cx);
+  assert.equal(h.mod.target.tab, 'vps/tb2'); // Parked or shown elsewhere: membership is unknown.
+  assert.equal(h.mod.target.label, '2');
+  h.rt.panes.push({ terminal: 'vps/t2', tab: 'vps/tb3' });
+  h.mod.render(h.cx);
+  assert.equal(h.mod.target.tab, 'vps/tb3');
+  assert.equal(h.mod.target.label, null); // The new tab's metadata has not arrived.
+  h.rt.spaces[0].tabs.push({ id: 'vps/tb3', name: 'moved' });
+  let header = h.mod.render(h.cx).nodes[0].nodes[1];
+  assert.equal(header.nodes[0], 'vps/moved');
+  assert.deepEqual(header.attrs.tooltip, ['vps/t2']);
+  h.rt.spaces[0].tabs.at(-1).name = 'renamed';
+  header = h.mod.render(h.cx).nodes[0].nodes[1];
+  assert.equal(header.nodes[0], 'vps/renamed');
+  assert.equal(h.rt.shared['cairn.target'].tab, 'vps/tb3');
+  assert.equal(h.rt.shared['cairn.target'].label, 'renamed');
+  h.mod.switchMode(h.cx); await settle(h);
+  const dock = harness(h.rt, { cairnMode: 'dock' });
+  assert.equal(dock.mod.target.tab, 'vps/tb3');
+  assert.equal(dock.mod.target.label, 'renamed');
+  assert.equal(dock.requests[0].options.on, 'vps');
 });
