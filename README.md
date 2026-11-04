@@ -25,14 +25,14 @@ teammate, or tomorrow's session, can pick up exactly where you left off.
 ## Install
 
 ```sh
-make install                # builds ~/.local/bin/cairn
-make install PREFIX=/usr/local
+go install github.com/ken8203/cairn/cmd/cairn@latest
 cairn setup
 ```
 
-Or just ask your agent to "set up cairn": `cairn skills get setup` tells it how. Install
-with `make install` rather than `go install`: the command lives in `./cmd`, so
-`go install` would name the binary `cmd`.
+This needs Go 1.27, and puts `cairn` in `$(go env GOPATH)/bin`, which must be on `PATH`.
+From a checkout, `make install` builds `~/.local/bin/cairn` instead
+(`make install PREFIX=/usr/local` for `/usr/local/bin`). Or just ask your agent to "set
+up cairn": `cairn skills get setup` tells it how.
 
 `cairn setup` installs cairn's plugin into Claude Code and Codex, and into herdr when
 it's on `PATH`, then runs `cairn doctor` to check the install. Codex runs a plugin's hooks

@@ -23,9 +23,9 @@ Go 1.27, with `encoding/json/v2` imported as `json`. When writing Go, follow the
   [docs/architecture.md](docs/architecture.md#package-dependencies); `cmd` passes
   behavior across as functions.
 - A behavior change lands with its docs in the same change: the `help` const in
-  `cmd/main.go` for commands, `internal/skills/guides/` for what agents using cairn are
-  told, [docs/reference.md](docs/reference.md) for the behavior, and the README when it
-  changes installing or everyday use.
+  `cmd/cairn/main.go` for commands, `internal/skills/guides/` for what agents using cairn
+  are told, [docs/reference.md](docs/reference.md) for the behavior, and the README when
+  it changes installing or everyday use.
 - Examples use fictional repos (`acme/api`, `acme/web`), in the terse, plain English of
   the existing docs.
 
