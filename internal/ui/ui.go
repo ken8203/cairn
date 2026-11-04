@@ -335,7 +335,7 @@ func (v *view) prLine(p github.PR, url string, width int, marker string, refWidt
 		hints = append(hints, "CI failing")
 	}
 	hint := strings.Join(hints, " · ")
-	ref := indent + shortRef(trail.Ref(url))
+	ref := shortRef(trail.Ref(url))
 	// Open PRs show CI; merged or closed ones are finished steps, ticked like the rest.
 	mark := cmp.Or(ciMark[p.CI], " ")
 	if p.Finished() {
@@ -349,9 +349,10 @@ func (v *view) prLine(p github.PR, url string, width int, marker string, refWidt
 		}
 		title = ansi.Truncate(title, max(rest, minTitleWidth), "…")
 	}
-	// OSC 8 links the ref; its padding is added outside the escape sequence.
-	line := fmt.Sprintf(" %s %s %s \x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\%*s \x1b[%sm%-6s\x1b[0m %s",
-		dim(v.key()), marker, mark, url, ref, refWidth-ansi.StringWidth(ref), "", style.color, style.label, title)
+	// OSC 8 links the ref, blue and underlined so it reads as one; an underline color
+	// alone is too faint, and Rex ignores palette ones. Padding stays outside the link.
+	line := fmt.Sprintf(" %s %s %s %s\x1b]8;;%s\x1b\\\x1b[34;4m%s\x1b[24;39m\x1b]8;;\x1b\\%*s \x1b[%sm%-6s\x1b[0m %s",
+		dim(v.key()), marker, mark, indent, url, ref, refWidth-ansi.StringWidth(indent+ref), "", style.color, style.label, title)
 	if hint != "" {
 		line += "  " + dim(hint)
 	}

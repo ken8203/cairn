@@ -56,7 +56,8 @@ changes.
 `cairn add` refuses a PR GitHub doesn't know. A step written before its PR exists
 becomes that PR with `cairn link <n> <pr>`, which also drops any other entry for it. A
 PR whose base branch is another step's head is shown as stacked, with a hint once that
-base has merged. Every row is numbered; the numbers are what `done` and `link` take.
+base has merged. Every row is numbered; the numbers are what `done` and `link` take. A
+PR's ref is a link to it (OSC 8), blue and underlined.
 
 Writes take a lock and replace the trail atomically, so sessions adding steps at the same
 time don't lose one.
