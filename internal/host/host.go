@@ -106,8 +106,34 @@ func named(name string) string {
 	return name
 }
 
-// Key is the pane key a user names: a key as stored, or a Rex block with its block: prefix.
-func Key(s string) string { return strings.TrimPrefix(s, "block:") }
+// Key validates a stored pane key or Rex block, and resolves hc-t1 on the local core.
+// Invalid or unavailable keys return empty.
+func Key(s string) string {
+	s = strings.TrimPrefix(s, "block:")
+	if s == "" || s == "." || s == ".." || Sanitize(s) != s {
+		return ""
+	}
+	if body, ok := strings.CutPrefix(s, "hc-"); ok {
+		addr, suffix, full := strings.Cut(body, ".")
+		if !hcAddress.MatchString(addr) || (full && (suffix == "" || suffix == "." || suffix == "..")) {
+			return ""
+		}
+		if !full {
+			out, err := cli("", "hc", "get", addr, "--json")
+			var terminal struct {
+				Address string `json:"address"`
+			}
+			if err != nil || json.Unmarshal(out, &terminal) != nil || terminal.Address != addr {
+				return ""
+			}
+			if key := hcKey(addr); key != "" {
+				return "hc-" + key
+			}
+			return ""
+		}
+	}
+	return s
+}
 
 // Title is the title of the pane a stored key names, or empty when its host doesn't know it.
 func Title(key string) string { return title(hosts, key) }

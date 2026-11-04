@@ -33,6 +33,7 @@ func stubTerminal(t *testing.T, id string) {
 
 func TestPane(t *testing.T) {
 	stubTerminal(t, "term_9")
+	fakeCLIs(t, map[string]string{"hc": `echo '{"core":{"id":"` + hcScope + `"}}'`})
 	tests := []struct {
 		env  map[string]string
 		want string

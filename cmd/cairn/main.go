@@ -33,6 +33,7 @@ steps (releases, flags, rollouts) that belongs to an agent session, and to any o
 session that joins it. cairn's agent hook records the PRs each session touches.
 
   cairn [show] [--json] [--dir <path>]   this session's trail, else this folder's, and the PRs it touched
+  cairn show --pane <key> [--json] [--dir <path>]   read another pane without changing sessions
   cairn ls                   every trail with its progress and next step
   cairn use <name>           attach this session to a trail, creating it if needed
   cairn add <step>...        append steps: owner/repo#n, a PR URL, or free text
@@ -43,9 +44,10 @@ session that joins it. cairn's agent hook records the PRs each session touches.
   cairn watch [pane] [--dir <path>]   keep a pane's view on screen (the panel)
   cairn watch --from-env     the same, for $CAIRN_PANE and $CAIRN_DIR (herdr's overlay)
   cairn panel [--close] [pane]   open or close a pane's panel in the terminal it runs in
+                            Herdr.app: compact native floating panel (Esc/q close, r refresh)
   cairn panel --lua [block]  print Rex's toggle as Lua, for an init.lua action
   cairn statusline           Claude Code statusline segment
-  cairn setup [--dry-run]    install cairn's plugin in Claude Code, Codex and herdr, then run doctor
+  cairn setup [--dry-run]    install agent plugins and herdr/Herdr.app panels, then run doctor
   cairn doctor [--json]      check the install without changing it; exit 1 on a failure
   cairn skills list          the guides for agents built into cairn
   cairn skills get <topic> [--full]   print a guide: cairn (using it), setup
@@ -139,12 +141,21 @@ func run(app ui.App, args []string) error {
 	}
 
 	switch arg(0) {
-	case "", "show", "--json", "--dir":
+	case "", "show", "--json", "--dir", "--pane":
+		target, targetDir, explicit, parseErr := showTarget(args)
+		if parseErr != nil {
+			return parseErr
+		}
 		// Outside a session, as in a plain terminal, the folder's trail still shows.
-		err := enter(agent)
-		found := app.Find(agent, pane(), dir())
-		if err != nil && found.Trail == "" {
-			return err
+		var found session.Found
+		if explicit {
+			found = app.Find("", target, targetDir)
+		} else {
+			err := enter(agent)
+			found = app.Find(agent, pane(), dir())
+			if err != nil && found.Trail == "" {
+				return err
+			}
 		}
 		if slices.Contains(args, "--json") {
 			b, err := json.Marshal(app.Data(found))
@@ -246,6 +257,9 @@ func run(app ui.App, args []string) error {
 				i++
 			} else {
 				target = host.Key(args[i])
+				if target == "" {
+					return fmt.Errorf("invalid or unavailable pane %q", args[i])
+				}
 			}
 		}
 		target = cmp.Or(target, pane())
@@ -262,6 +276,9 @@ func run(app ui.App, args []string) error {
 		for _, a := range args[1:] {
 			if !strings.HasPrefix(a, "--") {
 				target = host.Key(a)
+				if target == "" {
+					return fmt.Errorf("invalid or unavailable pane %q", a)
+				}
 			}
 		}
 		wd, _ := os.Getwd()
@@ -273,6 +290,11 @@ func run(app ui.App, args []string) error {
 			}
 			fmt.Print(lua)
 			return nil
+		}
+		if strings.HasPrefix(target, "hc-") || (target == "" && host.Name() == "Herdr.app") {
+			if handled, err := host.HerdrPanel(setup.HerdrAppHome(), closeOnly); handled || err != nil {
+				return err
+			}
 		}
 		err = host.Panel(self, target, wd, closeOnly)
 		if errors.Is(err, host.ErrNoPanel) {
@@ -333,6 +355,47 @@ func run(app ui.App, args []string) error {
 		return fmt.Errorf("unknown command '%s'; see `cairn --help`", arg(0))
 	}
 	return nil
+}
+
+// showTarget keeps explicit reads away from the caller's session and cwd.
+func showTarget(args []string) (target, dir string, explicit bool, err error) {
+	for _, a := range args {
+		if a == "--pane" || strings.HasPrefix(a, "--pane=") {
+			explicit = true
+		}
+	}
+	if !explicit {
+		return
+	}
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch a {
+		case "show", "--json":
+		case "--pane", "--dir":
+			if i+1 >= len(args) || args[i+1] == "" || strings.HasPrefix(args[i+1], "--") {
+				err = fmt.Errorf("%s requires a value", a)
+				return
+			}
+			i++
+			if a == "--pane" {
+				if target != "" {
+					err = errors.New("--pane may only be given once")
+					return
+				}
+				target = host.Key(args[i])
+				if target == "" {
+					err = fmt.Errorf("invalid or unavailable pane %q", args[i])
+					return
+				}
+			} else {
+				dir = args[i]
+			}
+		default:
+			err = fmt.Errorf("unexpected show argument %q", a)
+			return
+		}
+	}
+	return
 }
 
 // skillsCmd lists the built-in guides or prints one.

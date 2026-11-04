@@ -48,7 +48,9 @@ Step numbers are the row numbers `cairn` prints.
 - Use `cairn note` for what the next session needs: who is reviewing, what is blocked.
 - Run `cairn` to check where things stand before reporting progress.
 - When the user asks to see the trail, run `cairn panel`; when you need it as data, run
-  `cairn show --json`.
+  `cairn show --json`. To inspect another pane without changing sessions, use
+  `cairn show --pane <key> --json`; add `--dir` only for that target's folder.
+  Herdr.app shorthand `hc-t1` resolves on the machine where cairn runs.
 - In Orca, each worktree's card shows its trail's PRs and a `cairn · ` note on its own;
   don't set them with `orca worktree set` yourself.
 
@@ -69,3 +71,8 @@ Don't create a trail for one-off work with a single PR; the hook records it anyw
   session that recorded a PR from that worktree and branch.
 - Sessions are keyed by `$CODEX_THREAD_ID`, else `$CLAUDE_CODE_SESSION_ID`, else the
   terminal pane, so commands you run act on your own session.
+
+- Herdr.app's native floating panel follows terminal focus and retains its target when clicked.
+  It needs current cairn on remote machines too. Nested tmux/herdr panes have only
+  folder fallback in the outer panel. Escape or `q` closes it; `r` refreshes the view.
+  PR links are clickable; edit and tick steps through the CLI. Run `cairn skills get setup` for installation.

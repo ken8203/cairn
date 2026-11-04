@@ -258,6 +258,9 @@ func (p probe) checks(env Env) []Check {
 	if p.herdr.present {
 		cs = append(cs, p.herdr.check())
 	}
+	if onPath("herdr-app") {
+		cs = append(cs, herdrAppCheck())
+	}
 	h := Check{Check: "host", Status: OK, Detail: "no terminal host with panes"}
 	if name := env.Host(); name != "" {
 		h.Detail = name + ", pane " + cmp.Or(env.Pane(), "unknown")
