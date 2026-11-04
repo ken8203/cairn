@@ -48,7 +48,9 @@ Step numbers are the row numbers `cairn` prints.
 - Use `cairn note` for what the next session needs: who is reviewing, what is blocked.
 - Run `cairn` to check where things stand before reporting progress.
 - When the user asks to see the trail, run `cairn panel`; when you need it as data, run
-  `cairn show --json`.
+  `cairn show --json`. To inspect another pane without changing sessions, use
+  `cairn show --pane <key> --json`; add `--dir` only for that target's folder.
+  Herdr.app shorthand `hc-t1` resolves on the machine where cairn runs.
 - In Orca, each worktree's card shows its trail's PRs and a `cairn · ` note on its own;
   don't set them with `orca worktree set` yourself.
 
@@ -69,3 +71,14 @@ Don't create a trail for one-off work with a single PR; the hook records it anyw
   session that recorded a PR from that worktree and branch.
 - Sessions are keyed by `$CODEX_THREAD_ID`, else `$CLAUDE_CODE_SESSION_ID`, else the
   terminal pane, so commands you run act on your own session.
+
+- Herdr.app's native panel fixes the selected terminal when opened and retains it across Dock/Float.
+  Focus or tab changes do not retarget it; close and reopen to select another terminal.
+  The header names the source tab. Missing sources stay unavailable; empty focus at a fresh
+  open shows no source. Native `panel [key]` still captures app selection, not the explicit key.
+  It needs current cairn on remote machines too. Nested tmux/herdr panes have only
+  folder fallback in the outer panel. First open defaults to Dock and creates a personal
+  layout copy with a Cairn toggle button beside native tabs. Explicit saved Float is
+  preserved; Float returns to a window. The mode is remembered; `cairn panel --close` closes both.
+  Escape/q close and r refresh apply only while the panel has focus.
+  PR links are clickable; edit and tick steps through the CLI. Run `cairn skills get setup` for installation.

@@ -27,7 +27,7 @@ codex plugin marketplace add ken8203/cairn && codex plugin add cairn@cairn
 
 With herdr on `PATH`, setup also writes cairn's herdr plugin and links it (see
 [Panel](#panel)). Setup prints one `ok|done|skip|manual <step>: <detail>` line per step,
-runs only what's missing, never edits a config file itself, and ends with `cairn doctor`.
+runs only what's missing, leaves user settings and layouts alone, and ends with `cairn doctor`.
 `cairn setup --dry-run` shows what it would run. Agents load a plugin's hooks only when a
 session starts, so after installing or enabling the plugin in an agent setup prints
 `manual <agent>-restart: restart running <Agent> sessions to load cairn's hooks`.
@@ -42,6 +42,10 @@ you. In an agent session that never ran cairn's `SessionStart` hook (no `hooked/
 marker, see [State](#state)), as one started before the plugin was installed, the
 `session` check is a `warn` whose fix is to restart that session. Last, an `orca` line
 counts the Orca worktrees on trails, or says Orca isn't installed.
+
+With `herdr-app` on `PATH`, setup also installs the [native panel](#herdrapp-panel).
+Doctor adds a read-only `herdr-mod` check for missing, stale or edited assets; current
+assets do not imply that the floating panel is open.
 
 `cairn skills get` prints guides built into the binary, so an agent reads the one that
 matches the cairn it runs. The plugin's `cairn` skill only points the agent there.
@@ -77,7 +81,7 @@ that follows the session:
 | --- | --- | --- | --- |
 | herdr | `herdr-<session>.<id>.<terminal>` from `$HERDR_SESSION` (else `default`), `$HERDR_PANE_ID` and the pane's terminal id in `herdr pane get` | the label of the pane's tab in `herdr tab get`, unless still the number herdr gave it | the workspace's label |
 | tmux | `tmux-<pid>.<n>` from the server pid in `$TMUX` and `$TMUX_PANE` (`%3` is `tmux-<pid>.3`) | the window's name once renamed, which turns off its `automatic-rename` | the tmux session's name |
-| Herdr.app | `hc-<address>.<scope>` from `$HC_TERMINAL_ID` and `$HC_SCOPE`, titles and labels from the `hc` CLI | the app tab in the same `where` label, unless still its number | the app space in `hc get`'s `where` label |
+| Herdr.app | `hc-<address>.<core-id>` from `$HC_TERMINAL_ID` and `hc server status --json`'s `core.id`, titles and labels from the `hc` CLI | the app tab in the same `where` label, unless still its number | the app space in `hc get`'s `where` label |
 | Orca | `orca-<handle>` from `$ORCA_TERMINAL_HANDLE` | the worktree's directory name | the same |
 | Rex | `$REX_BLOCK` without its `block:` prefix | the label of the window holding the block, unless still Rex's `Window <last 8 of its id>` | the Rex session's label |
 
@@ -88,9 +92,14 @@ tmux server started with `-L`.
 In Ghostty or any other terminal there is no pane: an agent session works as anywhere
 else, but a human has no session of their own.
 
-A pane key names one pane process, never reused: a pane a host restores after a restart,
-or a new pane that gets an old one's number, starts fresh in cairn. Run
-`cairn use <name>` there to rejoin a trail.
+Herdr.app keys name a logical terminal: its permanent address on a permanent core.
+Shell recovery keeps its last agent trail. Replacing the core gives it a different key.
+Older `hc-<address>.<scope>` keys remain readable when passed explicitly. After an
+upgrade, sessions re-register under the new key on their next cairn command or hook;
+there is no prefix or timestamp migration. The private `HC_SCOPE` is not read.
+
+Other hosts' pane keys name one pane process: a restored or reused pane starts fresh.
+Run `cairn use <name>` there to rejoin a trail.
 
 A session that touches a PR already on another trail does not join it. When a session
 without a trail opens or pushes its own PR, cairn starts a trail for it, named after the
@@ -200,7 +209,7 @@ README's [Panel](../README.md#panel) section shows how to bind it.
 | Rex | a floating layer over the window, labelled `cairn` (`rex do - -b <block>` with a Lua script cairn carries) |
 | tmux | a popup, 80% by 50%, over the pane |
 | herdr | an overlay pane over the pane, labelled `cairn`, from cairn's herdr plugin; without the plugin, a pane split off to the right, 35% wide, named `cairn` in the same tab |
-| Herdr.app | a terminal named `cairn-<address>` in the same space and tab, from `hc run` |
+| Herdr.app | a native `cairn` mod in saved Floating/Dock mode; otherwise a terminal named `cairn-<address>` from `hc run` |
 | Orca | a terminal split off the pane, titled `cairn` |
 
 Rex starts an action's programs without the terminal's environment, where `rex` itself
@@ -220,8 +229,113 @@ as the action, it takes the focused pane's folder from `$HERDR_PLUGIN_CONTEXT_JS
 In a terminal without a pane API, `cairn panel` says so and exits 0. Each host CLI call
 times out after 10 seconds, and a failure is one line on stderr with exit 1.
 
-The panel opens on the cached PR states and asks GitHub for the stale ones behind them,
+The TUI panel opens on the cached PR states and asks GitHub for the stale ones behind them,
 fits itself to its pane as it's resized, and refreshes every 60 seconds.
+
+### Herdr.app panel
+
+Setup embeds and installs `main.js`, `dock.js`, `mod.json` and `binary.js` into
+`<app-home>/mods/cairn/`. The app home is `$HERDR_APP_HOME`, else
+`$XDG_CONFIG_HOME/herdr-app`, else `~/.config/herdr-app`. `binary.js` contains this
+cairn executable's absolute path. `.cairn-owned.json` records generated file hashes:
+setup updates owned files, preserves edits and unknown content with a manual conflict,
+and writes nothing on a dry run. Doctor reads these files without changing them.
+Move conflicting files aside yourself before reinstalling; keep your edits in a separate
+mod if you want to maintain a variant.
+
+The mod installs with `place: "none"`. First open defaults to Dock unless Float was
+explicitly saved. Float uses a 920 × 420 window with Herdr's frame, border and shadow.
+**Dock** switches to a right sidebar that shares space with the terminal; **Float** hides the sidebar and returns to the window.
+The sidebar starts at 400 px, has an invisible draggable divider and places PR titles below the
+state/CI/ref row. Herdr persists resized dimensions in its native layout state.
+Its frame matches the default terminal pane: 10 px corners, a 1 px border that uses
+the accent color while focused, and an 8 px gap beside the terminal.
+
+The first Dock in a layout without a Cairn dock creates a personal copy with a block
+beside its active-tab content and a Cairn toolbar beside the native tabs block.
+The tabs slot becomes a row, retaining its ID, geometry, paint and window-drag setting;
+its original content and props stay in a flexible child beside the fixed-width button.
+No tabs fork or extra mod is installed. An older marked dock without a toolbar is
+upgraded through a new copy; layouts containing both reuse them.
+It checks actual files through `readTextFile`, using an
+available `<layout>-cairn` name (then `-2`, `-3`, ...), skipping names with existing
+layout files or saved layout state, and creates the complete copy
+through `writeTextFile` with `expected: null` for exclusive creation. Only after that
+write succeeds does it queue `layout.switch`. A write failure or creation race leaves
+the floating view and previous mode intact with a visible error. Layout names must
+contain only letters, digits, hyphens and underscores; changing layouts during
+preparation cancels the switch. It preserves the original
+layout, Spaces, tab bar, status and Files/Changes panels. Later switches reuse the dock
+by its `content.mod: "cairn"` and `content.props.cairnMode: "dock"` marker, regardless
+of its node ID. Layouts without one unambiguous active-tab block inside a container,
+or with duplicate IDs, are refused with a visible error; use Float or another layout.
+Adding a toolbar also requires exactly one visible native `content.mod: "tabs"` block.
+Custom or ambiguous tab bars are left untouched and offer Float instead.
+This customization happens on Dock, not during setup. Setup never edits layouts or keys.
+The mod does not write `.state/` files.
+
+The selected mode is saved with Herdr's `shared` API under `cairn.mode`; `cairn.target`
+stores the source terminal, source tab metadata, presentation and open version between copies. These runtime choices are
+separate from installed assets and do not create setup ownership conflicts.
+
+The Cairn toolbar button, `cairn panel` and the `mod.open:cairn` keybinding toggle the
+saved mode. The button remains when the dock is hidden or Float is selected, without
+fetching data, polling or taking focus. Its highlight follows visible dock ancestry
+and stack selection, or a live floating view. Each toolbar mount requests a fresh
+visibility acknowledgement so persisted shared values cannot light it after restart.
+In dock mode, a short-lived overlay routes the toggle to the installed sidebar and closes itself,
+without taking keyboard focus or querying cairn. `cairn panel --close` closes Cairn's
+`mod-cairn` overlay and hides marked Cairn docks in the current layout, idempotently.
+It reads the current layout's public JSON for node IDs and sends `layout.hide`; it
+never writes layout/state files. It leaves other panels and overlays alone.
+
+```sh
+herdr-app do mod.open --name cairn  # toggle the saved mode
+cairn panel --close               # close Cairn in both modes
+```
+
+Merge `"ctrl-shift-t":"mod.open:cairn"` into a suitable `keys.json` section, such as
+`global`, keeping other bindings. The × button closes the current presentation.
+Escape or `q` closes and `r` refreshes only while Cairn has keyboard focus. Sidebar
+mounts keep terminal focus; click the panel to focus it. PR links are clickable;
+editing and ticking steps stay in the CLI.
+
+Without mod files or a reachable app, `cairn panel` falls back to the `hc` TUI panel.
+A failed native command or unreadable/malformed layout during close is reported as an
+error. In the native panel, `cairn panel [key]` uses the app's selected terminal at
+opening, even with an explicit key. The key still selects the host/fallback; the native
+mod does not bind or mutate that target's session.
+
+A fresh open captures the selected terminal (including a `terminal.show` replacement),
+just as Rex Watch fixes its pane key. Changing focus or tabs does not change this source.
+Dock/Float conversions and visible view restoration retain it; closing and reopening
+selects the newly focused terminal. Reloading the panel preserves its source.
+Hidden docks neither query nor adopt incidental focus.
+With no terminal focus on a fresh open, Cairn shows an empty source and asks you to focus
+a terminal and reopen. Only an active presentation or mode handoff restores a saved source;
+a closed target is not a fallback for an unrelated tab.
+
+The header shows the source pane's tab name, including native unnamed labels such as
+`2`, prefixed by the machine for remote targets. Tab moves and renames update live.
+A terminal without a known source tab uses `Terminal`; it never borrows the current tab's label. Hover over
+it to see the terminal address. A missing source shows an unavailable status, without
+adopting another terminal or displaying cached trail data.
+
+Both modes poll every three seconds and resolve the latest agent session through the
+same terminal key. Folder fallback uses that terminal's live cwd; an unknown cwd disables
+folder fallback instead of reusing an old folder. Each copy runs one request at a time
+and discards replies from an older open, folder or unavailable source. All trail, PR
+and CI logic remains in `cairn show --pane ... --json`;
+GitHub cache expiry and background refresh work as usual. PR links open only validated
+GitHub HTTPS URLs. The native panel is read-only; use the CLI to edit trails.
+
+For remote terminals, the mod runs `cairn` through Herdr's `exec` on that machine,
+using its local terminal address and core ID. Install current cairn, `hc` and authenticated
+`gh` there; the remote `cairn` must be on `PATH`. It reads that machine's cairn state,
+never the local machine's. Missing cwd means no folder fallback. When tmux or herdr TUI
+runs inside Herdr.app, cairn records only the inner pane; the native panel can then
+find a trail only through the terminal's folder, unless that outer terminal has its
+own mapping. It does not write inner/outer pane links.
 
 ## Orca workspaces
 
@@ -290,6 +404,14 @@ the session last run there, then the folder.
   answered, when `title` is left out; `ci` is `none`, `pending`, `pass` or `fail`.
 - `prs` are the PRs the session touched that aren't on its trail, each like a PR step's
   PR, and `[]` when there are none.
+
+`cairn show --pane <key> [--json] [--dir <path>]` reads that pane instead of the
+caller's agent or pane. It never registers a pane pointer or binds a session. Full
+stored keys and Rex `block:` keys work; `hc-t1` resolves a live terminal's permanent
+core ID by asking the local `hc` CLI, without using the caller's HC environment.
+Run this shorthand on the terminal's own machine. Missing or invalid `--pane` values
+fail. No data succeeds with `{"trail":null,"prs":[]}`. Only an explicit `--dir` enables
+folder fallback here: the mod's cwd must not become the target's folder.
 
 Fields may be added; existing ones keep their meaning.
 

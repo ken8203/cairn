@@ -551,3 +551,43 @@ func TestOrcaSync(t *testing.T) {
 		t.Errorf("orca calls %q, want %q", got, want)
 	}
 }
+
+func TestNativePanelExplicitKey(t *testing.T) {
+	bin, err := build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	mod := filepath.Join(home, "mods", "cairn")
+	if err := os.MkdirAll(mod, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"main.js", "dock.js", "mod.json", "binary.js"} {
+		if err := os.WriteFile(filepath.Join(mod, name), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dir := t.TempDir()
+	log := filepath.Join(dir, "calls")
+	script := `#!/bin/sh
+printf '%s\n' "$*" >> "$CALL_LOG"
+case "$*" in
+  status) echo '{}' ;;
+  'do mod.open --name cairn') ;;
+  *) exit 1 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(dir, "herdr-app"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The explicit key selects the native host; its mod captures app selection.
+	cmd := exec.Command(bin, "panel", "hc-t2.core")
+	cmd.Env = cairnEnv(t, "PATH="+dir, "HERDR_APP_HOME="+home, "CALL_LOG="+log)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("panel: %v, %s", err, out)
+	}
+	calls, err := os.ReadFile(log)
+	if err != nil || string(calls) != "status\ndo mod.open --name cairn\n" {
+		t.Fatalf("native calls = %q, %v", calls, err)
+	}
+}

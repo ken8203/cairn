@@ -5,31 +5,43 @@ import (
 	json "encoding/json/v2"
 	"fmt"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 )
 
-// hc is Herdr.app's terminal runtime, a different stack from the herdr TUI. Its
-// addresses may be handed out again, but HC_SCOPE is new in every terminal, so keys are
-// hc-<address>.<scope>.
+// hc keys follow a logical terminal across shell recovery on the same core.
 var hc = host{
 	name:   "Herdr.app",
 	prefix: "hc",
 	env:    "HC_TERMINAL_ID",
 	tab:    func() string { return named(hcTab(hcGet(os.Getenv("HC_TERMINAL_ID")).Labels.Where)) },
-	key: func(addr string) string {
-		scope := Sanitize(os.Getenv("HC_SCOPE"))
-		if scope == "" {
-			return ""
-		}
-		return Sanitize(addr) + "." + scope
-	},
-	label: func() string { return hcSpace(hcGet(os.Getenv("HC_TERMINAL_ID")).Labels.Where) },
+	key:    hcKey,
+	label:  func() string { return hcSpace(hcGet(os.Getenv("HC_TERMINAL_ID")).Labels.Where) },
 	title: func(body string) string {
 		t := hcGet(hcAddr(body))
 		return cmp.Or(t.Name, t.Title)
 	},
 	panel: hcPanel,
+}
+
+var hcAddress = regexp.MustCompile(`^t[1-9][0-9bcdfghjkmnpqrstvwxyz]*$`)
+
+func hcKey(addr string) string {
+	if !hcAddress.MatchString(addr) {
+		return ""
+	}
+	var status struct {
+		Core struct {
+			ID string `json:"id"`
+		} `json:"core"`
+	}
+	decode(&status, "hc", "server", "status", "--json")
+	id := status.Core.ID
+	if id == "" || id == "." || id == ".." || Sanitize(id) != id {
+		return ""
+	}
+	return addr + "." + id
 }
 
 type hcTerminal struct {

@@ -1,0 +1,1019 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { runInNewContext } from 'node:vm';
+import { test } from 'node:test';
+
+const source = ['dock.js', 'main.js'].map(file =>
+  readFileSync(new URL('./cairn-mod/' + file, import.meta.url), 'utf8')
+    .replace(/^import .*;\n/gm, '')
+    .replace(/export (async )?function /g, '$1function ')
+    .replace('export default class Cairn', 'class Cairn')).join('\n')
+  + '\nglobalThis.api = { Cairn, targetFrom, githubURL, dockNode, dockPlan };';
+
+const copy = value => value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+const layoutFixture = () => ({ id: 'root', type: 'row', theme: 'graphite', children: [
+  { id: 'spaces', type: 'block', size: { px: 180 }, content: { mod: 'spaces' } },
+  { id: 'work', type: 'column', children: [
+    { id: 'tabs', type: 'block', size: { px: 30 }, content: { mod: 'tabs' } },
+    { id: 'terminal', type: 'block', size: { weight: 2 }, content: { tab: 'active' }, background: 'canvas' },
+    { id: 'status', type: 'block', size: { px: 24 }, content: { mod: 'workspace-status' } },
+  ] },
+  { id: 'files', type: 'block', size: { px: 220 }, content: { mod: 'files' } },
+  { id: 'changes', type: 'block', content: { mod: 'changes' }, hidden: true },
+] });
+
+function runtime(tree = layoutFixture()) {
+  const rt = { shared: { layout: 'main', 'cairn.mode': 'float' }, trees: { main: copy(tree) },
+    disk: { '/app/layouts/main.json': JSON.stringify(tree) }, queue: [], events: [], errors: [],
+    terminals: [{ address: 't1', cwd: '/api' }, { address: 'vps/t2', cwd: '/remote/repo' }], panes: [{ terminal: 't1', tab: 'tb1' }, { terminal: 'vps/t2', tab: 'vps/tb2' }], spaces: [{ tabs: [{ id: 'tb1', name: 'cairn-preview' }, { id: 'vps/tb2', name: '2' }] }], commands: [], overlays: new Set(['mod-cairn', 'unrelated']), closed: [], focus: null, keyboard: null };
+  rt.flush = () => {
+    for (const { name, args } of rt.queue.splice(0)) {
+      if (name === 'layout.switch') {
+        const text = rt.disk['/app/layouts/' + args.name + '.json'];
+        if (!text) { rt.errors.push('missing layout'); continue; }
+        rt.trees[args.name] = JSON.parse(text);
+        rt.shared.layout = args.name;
+        rt.overlays.clear();
+      } else if (['layout.show', 'layout.hide', 'layout.toggle'].includes(name)) {
+        const node = findNode(rt.trees[rt.shared.layout], args.id);
+        if (!node) { rt.errors.push('missing node'); continue; }
+        node.hidden = name === 'layout.hide' || (name === 'layout.toggle' && !node.hidden);
+      } else if (name === 'layout.select') {
+        findNode(rt.trees[rt.shared.layout], args.stack).active = args.child;
+      } else if (name === 'mod.open') {
+        assert.equal(args.name, 'cairn');
+        if (rt.overlays.has('mod-cairn')) rt.overlays.delete('mod-cairn');
+        else rt.overlays.add('mod-cairn');
+      } else assert.fail('unexpected command: ' + name);
+    }
+  };
+  return rt;
+}
+async function settle(h) {
+  await new Promise(setImmediate);
+  h.rt.flush();
+}
+
+
+// GPUI elements may only be attached once and cannot be changed after attachment.
+function element(kind) {
+  const state = { kind, attached: false, nodes: [], attrs: {} };
+  const proxy = new Proxy(state, { get(target, key) {
+    if (key in target) return target[key];
+    return (...args) => {
+      assert.equal(state.attached, false, 'mutated an attached element');
+      if (key === 'child') {
+        const child = args[0];
+        if (typeof child === 'object') { assert.equal(child.attached, false); child.attached = true; }
+        state.nodes.push(child);
+      } else state.attrs[key] = args;
+      return proxy;
+    };
+  } });
+  return proxy;
+}
+
+function harness(rt, viewProps = { overlay: 'mod-cairn' }) {
+  const fresh = !rt;
+  rt ||= runtime();
+  if (fresh) rt.focus = { terminal: 't1', cwd: '/api', space: 'local' };
+  const requests = [], tasks = [], timers = [];
+  let focusCalls = 0;
+  let api;
+  const sandbox = {
+    View: class {}, binary: '/opt/my bin/cairn',
+    div: () => element('div'), h_flex: () => element('row'), v_flex: () => element('column'),
+    theme: () => new Proxy({}, { get: (_, key) => key }),
+    props: () => viewProps,
+    closeOverlay: id => { rt.closed.push(id); rt.overlays.delete(id); },
+    shared: key => copy(rt.shared[key]), setShared: (key, value) => { rt.shared[key] = copy(value); },
+    layout: () => copy(rt.trees[rt.shared.layout]),
+    appHome: () => '/app',
+    async readTextFile(path) {
+      rt.events.push({ kind: 'read', path });
+      if (rt.beforeRead) await rt.beforeRead(path);
+      return rt.disk[path] ?? null;
+    },
+    async writeTextFile(path, text, expected) {
+      rt.events.push({ kind: 'write-start', path, expected });
+      assert.equal(expected, null, 'only exclusive creation is allowed');
+      if (rt.beforeWrite) await rt.beforeWrite(path);
+      if (path in rt.disk) throw new Error('exclusive create: already exists');
+      rt.disk[path] = text;
+      rt.events.push({ kind: 'write-success', path });
+      if (rt.afterWrite) await rt.afterWrite(path);
+    },
+    run(name, args) {
+      const command = { name, args: copy(args) };
+      rt.commands.push(command); rt.queue.push(command);
+      rt.events.push({ kind: 'queue', name });
+    },
+    focused: () => rt.focus,
+    terminals: () => rt.terminals,
+    panes: () => rt.panes, spaces: () => rt.spaces,
+    exec: (cmd, args, options) => new Promise((resolve, reject) => requests.push({ cmd, args, options, resolve, reject })),
+  };
+  runInNewContext(source, sandbox);
+  api = sandbox.api;
+  const handle = { focus() { focusCalls++; rt.keyboard = handle; }, is_focused: () => rt.keyboard === handle };
+  const cx = { focus_handle: () => handle, stop_propagation() {}, timer: { every(ms, fn) { timers.push(fn); } },
+    notify() {}, spawn(fn) { const task = fn(cx); tasks.push(task); } };
+  const mod = new api.Cairn();
+  mod.init({}, cx);
+  return { ...api, mod, cx, rt, requests, tasks, closed: rt.closed, timers,
+    focusCalls: () => focusCalls, focus: f => { rt.focus = f; } };
+}
+function openAt(focus) {
+  const rt = runtime();
+  rt.focus = focus;
+  if (focus?.terminal) {
+    rt.terminals = rt.terminals.filter(t => t.address !== focus.terminal);
+    rt.terminals.push({ address: focus.terminal, cwd: focus.cwd });
+  }
+  return harness(rt);
+}
+function findNode(tree, id) {
+  if (tree.id === id) return tree;
+  for (const child of tree.children || []) { const node = findNode(child, id); if (node) return node; }
+}
+const empty = { code: 0, stdout: '{"trail":null,"prs":[]}', stderr: '' };
+
+test('floating panel closes only itself and refresh ignores modified keys', async () => {
+  const h = harness();
+  h.mod.syncTarget(); h.requests[0].resolve(empty); await h.tasks[0];
+  h.mod.key({ keystroke: 'cmd+r' }, h.cx);
+  assert.equal(h.requests.length, 1);
+  h.mod.key({ keystroke: 'r' }, h.cx);
+  assert.equal(h.requests.length, 2);
+  h.requests[1].resolve(empty); await h.tasks[1];
+  h.mod.key({ keystroke: 'cmd+q' }, h.cx);
+  assert.deepEqual(h.closed, []);
+  h.mod.key({ keystroke: 'q' }, h.cx);
+  h.mod.key({ keystroke: 'escape' }, h.cx);
+  assert.deepEqual(h.closed, ['mod-cairn', 'mod-cairn']);
+});
+
+test('focus changes retain the opening source and latest refresh, including mod focus', async () => {
+  const h = harness();
+  h.focus({ terminal: 'vps/t2', cwd: '/remote/repo', space: 'vps/space' });
+  h.mod.syncTarget();
+  assert.equal(h.requests.length, 1);
+  assert.equal(h.mod.target.terminal, 't1');
+  h.requests[0].resolve(empty); await h.tasks[0];
+  h.mod.refresh(h.cx);
+  assert.equal(h.requests[1].cmd, '/opt/my bin/cairn');
+  assert.equal(h.requests[1].args[2], 'hc-t1');
+  h.focus(null); h.mod.syncTarget();
+  assert.equal(h.mod.target.cwd, '/api');
+  h.requests[1].resolve({ ...empty, stdout: '{"trail":null,"prs":[{"ref":"latest session"}]}' });
+  await h.tasks[1];
+  assert.equal(h.mod.data.prs[0].ref, 'latest session');
+});
+
+test('close and fresh open select B without borrowing cwd, and errors recover', async () => {
+  const first = harness();
+  first.mod.closePanel();
+  first.focus({ terminal: 't3', cwd: null });
+  first.rt.terminals.push({ address: 't3' });
+  const h = harness(first.rt);
+  assert.deepEqual(Array.from(h.requests[0].args), ['show', '--pane', 'hc-t3', '--json']);
+  h.requests[0].reject(new Error('offline')); await h.tasks[0];
+  assert.match(h.mod.error, /offline/);
+  h.mod.refresh(h.cx); h.requests[1].resolve(empty); await h.tasks[1];
+  assert.equal(h.mod.error, '');
+  first.requests[0].resolve({ ...empty, stdout: '{"trail":null,"prs":[{"ref":"stale"}]}' });
+  await first.tasks[0];
+  assert.equal(first.mod.data, null);
+  assert.equal(h.mod.data.prs.length, 0);
+});
+
+test('shown terminals use their own machine and cwd; unsafe links are inert', () => {
+  const h = harness();
+  const target = h.targetFrom({ terminal: 't1', shown: 'vps/t2', cwd: '/wrong', space: 'local' }, [{ address: 'vps/t2', cwd: '/right' }]);
+  assert.equal(target.machine, 'vps'); assert.equal(target.cwd, '/right');
+  assert.equal(h.targetFrom({ terminal: 't1', shown: 'vps/t2', cwd: '/wrong' }, []).cwd, null);
+  for (const url of ['https://github.com/acme/api/pull/12']) assert.equal(h.githubURL(url), true);
+  for (const url of ['http://github.com/acme/api/pull/1', 'https://github.com.evil/acme/api/pull/1', 'https://github.com@evil/acme/api/pull/1', 'javascript:alert(1)', 'https://github.com/acme/api/pull/1\n', 'https://github.com/acme/api/pull/1?x=1']) assert.equal(h.githubURL(url), false, url);
+});
+
+test('local terminal blocks in remote window context query locally without borrowing remote context', async () => {
+  const h = openAt({ terminal: 't1', cwd: '/local/repo', space: 'vps/space' });
+  h.mod.syncTarget();
+  assert.equal(h.requests.length, 1);
+  assert.equal(h.requests[0].cmd, '/opt/my bin/cairn');
+  assert.equal(h.requests[0].options.on, null);
+  assert.deepEqual(Array.from(h.requests[0].args), ['show', '--pane', 'hc-t1', '--json', '--dir', '/local/repo']);
+
+  h.requests[0].resolve(empty); await h.tasks[0];
+});
+
+test('same target reopened gets a new version and rejects the old pending response', async () => {
+  const h = harness();
+  const version = h.rt.shared['cairn.target'].version;
+  await h.mod.close(h.cx);
+  const reopened = harness(h.rt);
+  assert.notEqual(h.rt.shared['cairn.target'].version, version);
+  h.requests[0].resolve({ ...empty, stdout: '{"trail":null,"prs":[{"ref":"stale A"}]}' });
+  await h.tasks[0];
+  assert.equal(h.mod.data, null);
+  reopened.requests[0].resolve(empty); await reopened.tasks[0];
+  assert.equal(reopened.mod.data.prs.length, 0);
+});
+
+test('core address alphabet and malformed remote addresses', async () => {
+  for (const address of ['t19', 't1b', 't1z', 't20', 't9z', 'vps/t1b', 'vps/t9z']) {
+    const h = openAt({ terminal: address, cwd: '/repo', space: 'local' });
+    h.mod.syncTarget();
+    assert.equal(h.requests.length, 1, address);
+    assert.equal(h.requests[0].options.on, address.includes('/') ? 'vps' : null);
+    assert.equal(h.requests[0].args[2], 'hc-' + address.split('/').at(-1));
+    h.requests[0].resolve(empty); await h.tasks[0];
+  }
+  for (const address of ['t1a', 't1e', 't1i', 't1l', 't1o', 't1u', 'tb1', 't01', '/t1b', 'vps//t9z', 'vps/t1b/extra', 'vps/']) {
+    const h = openAt({ terminal: address, cwd: '/repo' });
+    h.mod.syncTarget();
+    assert.equal(h.mod.target, null, address);
+    assert.equal(h.requests.length, 0, address);
+  }
+});
+
+test('Dock wraps only the active terminal and preserves other panels, with collision-safe names', () => {
+  const h = harness();
+  const tree = layoutFixture();
+  tree.children.push({ id: 'cairn-dock', type: 'block', content: { mod: 'other' } });
+  tree.children.push({ id: 'cairn-work', type: 'block', content: { mod: 'another' } });
+  const original = copy(tree);
+  const plan = h.dockPlan(tree);
+  assert.deepEqual(tree, original);
+  assert.equal(plan.id, 'cairn-dock-2');
+  const next = copy(plan.layout);
+  for (const i of [0, 2, 3, 4, 5]) assert.deepEqual(next.children[i], original.children[i]);
+  const work = findNode(next, 'work');
+  assert.deepEqual(work.children[0].children[0].content, original.children[1].children[0].content);
+  assert.deepEqual(work.children[2], original.children[1].children[2]);
+  const row = work.children[1];
+  assert.equal(row.type, 'row'); assert.equal(row.id, 'cairn-work-2');
+  assert.deepEqual(row.size, { weight: 2 });
+  assert.equal(row.children[0].id, 'terminal'); assert.equal(row.children[0].background, 'canvas');
+  assert.equal(row.children[1].size.px, 400); assert.equal(row.divider, undefined);
+  assert.deepEqual(row.children[1].content, { mod: 'cairn', props: { cairnMode: 'dock' } });
+  assert.equal(next.theme, tree.theme);
+});
+
+test('floating → dock → float retains target, avoids focus stealing and prevents duplicate transitions', async () => {
+  const h = openAt({ terminal: 'vps/t2', cwd: '/remote/repo', space: 'vps/space' });
+  h.mod.syncTarget();
+  h.focus({ terminal: 't1', cwd: '/api' }); // A mode switch must ignore another focused terminal.
+  const original = copy(h.rt.trees.main);
+  h.mod.switchMode(h.cx);
+  h.mod.switchMode(h.cx);
+  await settle(h);
+  assert.equal(h.rt.shared['cairn.mode'], 'dock');
+  assert.deepEqual(h.rt.commands.map(c => c.name), ['layout.switch']);
+  assert.deepEqual(h.rt.trees.main, original);
+  assert.equal(h.rt.overlays.has('mod-cairn'), false);
+  const dock = harness(h.rt, { cairnMode: 'dock' });
+  assert.equal(dock.focusCalls(), 0);
+  assert.equal(dock.mod.target.machine, 'vps');
+  assert.equal(dock.mod.target.cwd, '/remote/repo');
+  assert.equal(dock.requests.length, 1);
+  dock.mod.switchMode(dock.cx);
+  dock.mod.switchMode(dock.cx); // Hidden instances must not toggle the overlay again.
+  await settle(dock);
+  assert.equal(h.rt.shared['cairn.mode'], 'float');
+  assert.equal(h.dockNode(h.rt.trees[h.rt.shared.layout]).hidden, true);
+  assert.equal(h.rt.overlays.has('mod-cairn'), true);
+  assert.equal(h.rt.commands.filter(c => c.name === 'mod.open').length, 1);
+  const floating = harness(h.rt);
+  assert.equal(floating.mod.target.terminal, 't2');
+  assert.equal(floating.focusCalls(), 1);
+  floating.mod.closePanel();
+  assert.equal(h.rt.overlays.has('mod-cairn'), false);
+  h.rt.overlays.add('mod-cairn');
+  const reopened = harness(h.rt);
+  assert.equal(reopened.mod.docked, false);
+  assert.equal(reopened.mod.routed, false);
+  assert.equal(h.rt.commands.filter(c => c.name === 'layout.switch').length, 1);
+});
+
+test('saved dock mode routes reopen to show/hide, preserving dimensions across copies and restart', async () => {
+  const h = harness();
+  h.mod.syncTarget(); h.focus(null); h.mod.switchMode(h.cx);
+  await settle(h);
+  const node = h.dockNode(h.rt.trees[h.rt.shared.layout]);
+  node.size.px = 517; // Native divider state as exposed by effective layout().
+  const dock = harness(h.rt, { cairnMode: 'dock' });
+  h.rt.overlays.add('unrelated');
+  dock.mod.closePanel(); dock.mod.closePanel();
+  await settle(dock);
+  assert.equal(node.hidden, true);
+  assert.equal(h.rt.overlays.has('unrelated'), true);
+  for (const hidden of [false, true, false]) {
+    h.rt.overlays.add('mod-cairn');
+    const router = harness(h.rt);
+    await settle(router);
+    router.mod.render(router.cx); router.mod.render(router.cx);
+    assert.equal(router.mod.routed, true);
+    assert.equal(router.focusCalls(), 0); assert.equal(router.requests.length, 0);
+    assert.equal(router.timers.length, 0);
+    assert.equal(node.hidden, hidden); assert.equal(node.size.px, 517);
+    assert.equal(h.rt.overlays.has('mod-cairn'), false);
+    assert.equal(h.rt.overlays.has('unrelated'), true);
+  }
+  assert.equal(h.rt.commands.filter(c => c.name === 'layout.switch').length, 1);
+  const restarted = runtime();
+  restarted.trees = copy(h.rt.trees); restarted.shared = copy(h.rt.shared); restarted.disk = copy(h.rt.disk);
+  const router = harness(restarted);
+  await settle(router);
+  assert.equal(router.mod.routed, true);
+  assert.equal(router.requests.length, 0);
+  assert.equal(router.dockNode(restarted.trees[restarted.shared.layout]).size.px, 517);
+  assert.equal(restarted.commands[0].name, 'layout.toggle');
+});
+
+test('existing dock is found by marker and reused even with a different ID', async () => {
+  const h = harness();
+  h.rt.trees.main.children.push({ id: 'toolbar', type: 'block', content: { mod: 'cairn', props: { cairnMode: 'toolbar' } } });
+  h.rt.trees.main.children.push({ id: 'renamed-node', type: 'block', hidden: true, size: { px: 480 },
+    content: { mod: 'cairn', props: { cairnMode: 'dock' } } });
+  h.rt.trees.main.children.push({ id: 'cairn-dock', type: 'block', content: { mod: 'files' } });
+  h.mod.switchMode(h.cx);
+  await settle(h);
+  assert.deepEqual(h.rt.commands, [{ name: 'layout.show', args: { id: 'renamed-node' } }]);
+  assert.equal(findNode(h.rt.trees.main, 'renamed-node').size.px, 480);
+  assert.equal(findNode(h.rt.trees.main, 'cairn-dock').hidden, undefined);
+});
+
+test('unsupported trees fail visibly without cloning or replacing any layout', async () => {
+  for (const tree of [
+    { id: 'terminal', type: 'block', content: { terminal: 't1' } },
+    { type: 'row', children: [
+      { id: 'a', type: 'block', content: { tab: 'active' } },
+      { id: 'b', type: 'block', content: { tab: 'active' } },
+    ] },
+    { type: 'row', children: [{ id: 'a' }, { id: 'a' }] },
+  ]) {
+    const rt = runtime(tree), before = copy(rt.trees);
+    const h = harness(rt);
+    h.mod.switchMode(h.cx);
+    await settle(h);
+    assert.match(h.mod.modeError, /Cannot dock/);
+    assert.equal(rt.shared['cairn.mode'] || 'float', 'float');
+    assert.deepEqual(rt.trees, before); assert.deepEqual(rt.commands, []);
+    assert.equal(rt.overlays.has('mod-cairn'), true);
+    assert.doesNotThrow(() => h.mod.render(h.cx));
+    rt.shared['cairn.mode'] = 'dock';
+    const reopen = harness(rt);
+    await settle(reopen);
+    assert.equal(reopen.mod.routeFailed, true);
+    reopen.mod.switchMode(reopen.cx); // Visible Float escape hatch.
+    assert.equal(rt.shared['cairn.mode'], 'float');
+    assert.equal(reopen.mod.modeError, '');
+  }
+});
+
+test('docked keyboard actions only run with panel focus and close only the dock', async () => {
+  const h = harness();
+  h.mod.switchMode(h.cx);
+  await settle(h);
+  h.rt.keyboard = 'terminal';
+  const dock = harness(h.rt, { cairnMode: 'dock' });
+  assert.equal(h.rt.keyboard, 'terminal');
+  const before = dock.requests.length;
+  const count = h.rt.commands.length;
+  for (const keystroke of ['r', 'q', 'escape']) dock.mod.key({ keystroke }, dock.cx);
+  assert.equal(dock.requests.length, before); assert.equal(h.rt.commands.length, count);
+  dock.mod.handle.focus();
+  dock.mod.key({ keystroke: 'q' }, dock.cx);
+  assert.equal(h.rt.commands.at(-1).name, 'layout.hide');
+  assert.equal(h.rt.commands.at(-1).args.id, h.dockNode(h.rt.trees[h.rt.shared.layout]).id);
+  assert.equal(h.rt.closed.includes(undefined), false);
+});
+
+test('a reused hidden dock accepts the complete target handed off from floating', async () => {
+  const h = harness();
+  h.mod.syncTarget(); h.focus(null); h.mod.switchMode(h.cx);
+  await settle(h);
+  const dock = harness(h.rt, { cairnMode: 'dock' });
+  assert.equal(dock.mod.target.terminal, 't1');
+  dock.mod.switchMode(dock.cx);
+  await settle(dock);
+  const handoff = harness(h.rt);
+  handoff.mod.closePanel();
+  h.focus({ terminal: 'vps/t2', cwd: '/other', space: 'vps/space' });
+  h.rt.terminals.find(t => t.address === 'vps/t2').cwd = '/other';
+  const floating = harness(h.rt);
+  floating.mod.syncTarget(); floating.focus(null);
+  floating.mod.switchMode(floating.cx);
+  await settle(floating);
+  dock.mod.render(dock.cx);
+  assert.equal(dock.mod.target.terminal, 't2');
+  assert.equal(dock.mod.target.machine, 'vps');
+  assert.equal(dock.mod.target.cwd, '/other');
+  assert.equal(dock.mod.data, null);
+  dock.requests[0].resolve({ ...empty, stdout: '{"trail":null,"prs":[{"ref":"old dock target"}]}' });
+  await dock.tasks[0];
+  assert.equal(dock.mod.data, null);
+  assert.equal(dock.requests.length, 2);
+  assert.equal(dock.requests[1].options.on, 'vps');
+  assert.equal(dock.requests[1].args.at(-1), '/other');
+  dock.requests[1].resolve(empty); await dock.tasks[1];
+  assert.equal(dock.mod.data.prs.length, 0);
+  assert.equal(h.rt.commands.filter(c => c.name === 'layout.switch').length, 1);
+});
+
+test('compact renders respect single-use elements in floating and dock modes and place dock titles below', () => {
+  const h = harness();
+  const pr = { n: 1, kind: 'pr', ref: 'acme/api#12', title: 'Long title for the dock', state: 'open', ci: 'pending', stacked_on: 'acme/api#11', url: 'https://github.com/acme/api/pull/12' };
+  const data = { trail: { name: 'work', done: 0, total: 2, steps: [pr, { n: 2, kind: 'text', text: 'release' }], notes: ['a note'] }, prs: [pr] };
+  for (const docked of [false, true]) {
+    h.mod.docked = docked;
+    if (docked) h.rt.trees.main = h.dockPlan(h.rt.trees.main).layout;
+    h.mod.syncTarget();
+    for (const state of ['loading', 'error', 'empty', 'data']) {
+      h.mod.error = state === 'error' ? 'offline' : '';
+      h.mod.data = state === 'loading' ? null : state === 'empty' ? { trail: null, prs: [] } : data;
+      assert.doesNotThrow(() => h.mod.render(h.cx), state);
+    }
+    const row = h.mod.pr(pr, 'test-pr', 120);
+    if (docked) {
+      assert.equal(row.kind, 'column');
+      assert.equal(row.nodes[0].kind, 'row');
+      assert.equal(row.nodes[1].nodes[0], pr.title);
+    } else assert.equal(row.kind, 'row');
+  }
+});
+
+
+test('hidden active-tab content is not chosen as a docking location', () => {
+  const h = harness();
+  const hidden = { id: 'hidden', type: 'block', hidden: true, content: { tab: 'active' } };
+  const tree = layoutFixture(); tree.children.push(hidden);
+  const plan = h.dockPlan(tree);
+  assert.deepEqual(copy(plan.layout.children.at(-1)), hidden);
+  assert.equal(h.dockNode(plan.layout).id, plan.id);
+  assert.throws(() => h.dockPlan({ type: 'row', children: [hidden] }), /no active-tab block/);
+});
+
+function deferred() {
+  let resolve;
+  const promise = new Promise(r => { resolve = r; });
+  return { promise, resolve };
+}
+
+function personalRuntime() {
+  const rt = runtime();
+  rt.shared.layout = 'work';
+  rt.trees.work = rt.trees.main;
+  delete rt.trees.main;
+  rt.disk = { '/app/layouts/work.json': JSON.stringify(rt.trees.work) };
+  return rt;
+}
+
+test('disk collision omitted by layouts never overwrites the original personal layout', async () => {
+  const rt = personalRuntime();
+  const original = rt.disk['/app/layouts/work.json'];
+  const omitted = '{"type":"block","content":{"mod":"missing-mod"}}';
+  rt.disk['/app/layouts/work-cairn.json'] = omitted;
+  assert.equal('work-cairn' in rt.trees, false); // layouts() omits this file.
+  const h = harness(rt);
+  h.mod.switchMode(h.cx);
+  await settle(h);
+  assert.equal(rt.disk['/app/layouts/work.json'], original);
+  assert.equal(rt.disk['/app/layouts/work-cairn.json'], omitted);
+  assert.equal(rt.shared.layout, 'work-cairn-2');
+  assert.deepEqual(rt.commands, [{ name: 'layout.switch', args: { name: 'work-cairn-2' } }]);
+  assert.equal(JSON.parse(rt.disk['/app/layouts/work-cairn-2.json']).cloned_from, undefined);
+  assert.ok(rt.events.findIndex(e => e.kind === 'write-success') < rt.events.findIndex(e => e.kind === 'queue'));
+});
+
+test('new Dock layout avoids leftover native click state without modifying it', async () => {
+  const rt = personalRuntime();
+  const statePath = '/app/layouts/.state/work-cairn.json';
+  const stale = JSON.stringify({ nodes: { 'cairn-dock': { hidden: true }, sidebar: { size: { px: 100 } } } });
+  rt.disk[statePath] = stale;
+  const h = harness(rt);
+  h.mod.switchMode(h.cx);
+  await settle(h);
+  assert.equal(rt.shared.layout, 'work-cairn-2');
+  assert.equal(rt.disk[statePath], stale);
+  assert.equal(rt.disk['/app/layouts/work-cairn.json'], undefined);
+  assert.equal(h.dockNode(rt.trees[rt.shared.layout]).hidden, undefined);
+});
+
+test('Dock remains floating and queues nothing until exclusive write resolves, including repeat clicks', async () => {
+  const rt = personalRuntime();
+  const gate = deferred();
+  rt.beforeWrite = () => gate.promise;
+  rt.shared['cairn.mode'] = 'float';
+  const h = harness(rt);
+  h.mod.switchMode(h.cx); h.mod.switchMode(h.cx);
+  await settle(h);
+  assert.equal(rt.events.filter(e => e.kind === 'write-start').length, 1);
+  assert.deepEqual(rt.commands, []); assert.deepEqual(rt.closed, []);
+  assert.equal(rt.overlays.has('mod-cairn'), true);
+  assert.equal(rt.shared['cairn.mode'], 'float');
+  assert.equal(rt.shared.layout, 'work');
+  gate.resolve(); await settle(h);
+  assert.equal(rt.shared['cairn.mode'], 'dock');
+  assert.equal(rt.shared.layout, 'work-cairn');
+  assert.equal(rt.commands.length, 1);
+});
+
+test('write failure and exclusive-create race keep original tree, mode and floating view', async () => {
+  for (const race of [false, true]) {
+    const rt = personalRuntime();
+    const original = copy(rt.disk);
+    rt.shared['cairn.mode'] = 'float';
+    rt.beforeWrite = async path => {
+      if (race) rt.disk[path] = 'racing owner';
+      else throw new Error('permission denied');
+    };
+    const h = harness(rt);
+    h.mod.switchMode(h.cx); await settle(h);
+    assert.match(h.mod.modeError, race ? /already exists/ : /permission denied/);
+    assert.equal(rt.shared.layout, 'work'); assert.equal(rt.shared['cairn.mode'], 'float');
+    assert.equal(rt.disk['/app/layouts/work.json'], original['/app/layouts/work.json']);
+    if (race) assert.equal(rt.disk['/app/layouts/work-cairn.json'], 'racing owner');
+    assert.deepEqual(rt.commands, []); assert.deepEqual(rt.closed, []);
+    assert.equal(rt.overlays.has('mod-cairn'), true);
+    assert.equal(h.mod.switching, false);
+  }
+});
+
+test('pending router does not focus or fetch; failed creation becomes a usable floating view', async () => {
+  const rt = personalRuntime();
+  const gate = deferred();
+  rt.shared['cairn.mode'] = 'dock';
+  rt.focus = { terminal: 't1b', cwd: '/repo' };
+  rt.terminals.push({ address: 't1b', cwd: '/repo' });
+  rt.beforeWrite = async () => { await gate.promise; throw new Error('disk full'); };
+  const h = harness(rt);
+  await settle(h);
+  assert.equal(h.focusCalls(), 0); assert.equal(h.requests.length, 0); assert.equal(h.timers.length, 0);
+  assert.equal(h.mod.routing, true); assert.equal(rt.overlays.has('mod-cairn'), true);
+  assert.deepEqual(rt.commands, []);
+  gate.resolve(); await settle(h);
+  assert.equal(h.mod.routeFailed, true); assert.match(h.mod.modeError, /disk full/);
+  assert.equal(h.focusCalls(), 1); assert.equal(h.requests.length, 1);
+  assert.equal(rt.shared['cairn.mode'], 'dock');
+  h.mod.switchMode(h.cx);
+  assert.equal(rt.shared['cairn.mode'], 'float');
+  assert.equal(h.mod.modeError, ''); assert.equal(rt.overlays.has('mod-cairn'), true);
+});
+
+test('layout changes during read or write preparation prevent switching to the new copy', async () => {
+  for (const phase of ['read', 'write']) {
+    const rt = personalRuntime();
+    const original = rt.disk['/app/layouts/work.json'];
+    const gate = deferred();
+    if (phase === 'read') rt.beforeRead = () => gate.promise;
+    else rt.beforeWrite = () => gate.promise;
+    const h = harness(rt);
+    h.mod.switchMode(h.cx); await settle(h);
+    rt.trees.other = layoutFixture(); rt.shared.layout = 'other';
+    gate.resolve(); await settle(h);
+    assert.match(h.mod.modeError, /Layout changed/);
+    assert.equal(rt.shared.layout, 'other'); assert.deepEqual(rt.commands, []);
+    assert.equal(rt.disk['/app/layouts/work.json'], original);
+    if (phase === 'read') assert.equal(rt.events.some(e => e.kind === 'write-start'), false);
+  }
+});
+
+test('unsafe source names are rejected before any file API or command runs', async () => {
+  for (const name of ['../outside', 'a/b', 'a\\b', '', '.', '..', 'name.json', 'a b']) {
+    const rt = personalRuntime(); rt.trees[name] = rt.trees.work; rt.shared.layout = name;
+    const h = harness(rt); h.mod.switchMode(h.cx); await settle(h);
+    assert.match(h.mod.modeError, /invalid current layout name/);
+    assert.deepEqual(rt.events, []); assert.deepEqual(rt.commands, []);
+  }
+});
+
+test('closing while exclusive creation is pending cancels the mode switch', async () => {
+  const rt = personalRuntime(); const gate = deferred();
+  rt.beforeWrite = () => gate.promise;
+  const h = harness(rt); h.mod.switchMode(h.cx); await settle(h);
+  h.mod.closePanel(); gate.resolve(); await settle(h);
+  assert.deepEqual(rt.commands, []); assert.equal(rt.shared.layout, 'work');
+  assert.equal(rt.overlays.has('mod-cairn'), false);
+});
+
+test('native overlay teardown cancels a pending Dock even without the close button', async () => {
+  const rt = personalRuntime(); const gate = deferred();
+  rt.beforeWrite = () => gate.promise;
+  const h = harness(rt); h.mod.switchMode(h.cx); await settle(h);
+  await h.mod.close(h.cx); gate.resolve(); await settle(h);
+  assert.deepEqual(rt.commands, []);
+  assert.equal(rt.shared.layout, 'work');
+  assert.notEqual(rt.shared['cairn.mode'], 'dock');
+});
+
+test('selected second stack child keeps selection after being wrapped', () => {
+  const h = harness();
+  const tree = { id: 'root', type: 'stack', active: 'terminal', children: [
+    { id: 'files', type: 'block', content: { mod: 'files' } },
+    { id: 'terminal', type: 'block', content: { tab: 'active' } },
+  ] };
+  tree.children.push({ id: 'toolbar', type: 'block', content: { mod: 'cairn', props: { cairnMode: 'toolbar' } } });
+  const plan = h.dockPlan(tree);
+  assert.equal(plan.layout.active, plan.layout.children[1].id);
+  assert.equal(plan.layout.children[1].type, 'row');
+  assert.equal(plan.layout.children[1].children[0].id, 'terminal');
+  assert.equal(tree.active, 'terminal');
+});
+
+test('stack falls back to first visible child when active is missing, stale or hidden', () => {
+  const h = harness();
+  for (const active of [undefined, 'stale', 'files']) {
+    const tree = { id: 'root', type: 'stack', active, children: [
+      { id: 'files', type: 'block', hidden: true, content: { mod: 'files' } },
+      { id: 'terminal', type: 'block', content: { tab: 'active' } },
+    ] };
+    tree.children.push({ id: 'toolbar', type: 'block', content: { mod: 'cairn', props: { cairnMode: 'toolbar' } } });
+    const plan = h.dockPlan(tree);
+    assert.equal(plan.layout.active, plan.layout.children[1].id);
+    assert.equal(plan.layout.children[1].children[0].id, 'terminal');
+    assert.deepEqual(copy(plan.layout.children[0]), tree.children[0]);
+  }
+});
+
+test('long target and trail names can shrink without displacing dock controls or progress', () => {
+  const h = openAt({ terminal: 'very-long-remote-machine-name/t1', cwd: '/repo' }); h.mod.docked = true;
+  h.rt.trees.main = h.dockPlan(h.rt.trees.main).layout;
+  h.mod.data = { trail: { name: 'a very long trail name', done: 0, total: 1, steps: [], notes: [] }, prs: [] };
+  const root = h.mod.render(h.cx).nodes[0];
+  const header = root.nodes[0];
+  assert.deepEqual(header.nodes[1].attrs.min_w, [0]); assert.ok(header.nodes[1].attrs.truncate);
+  assert.ok(header.nodes[2].attrs.flex_shrink_0); assert.ok(header.nodes[3].attrs.flex_shrink_0);
+  const title = root.nodes[1].nodes[0];
+  assert.deepEqual(title.nodes[0].attrs.min_w, [0]); assert.ok(title.nodes[0].attrs.truncate);
+  assert.ok(title.nodes[1].attrs.flex_shrink_0);
+});
+
+test('first open defaults to Dock with toolbar, while explicitly saved Float stays floating', async () => {
+  const rt = runtime(); delete rt.shared['cairn.mode'];
+  rt.focus = { terminal: 'vps/t2', cwd: '/remote/repo' };
+  const h = harness(rt); await settle(h);
+  assert.equal(h.focusCalls(), 0); assert.equal(h.requests.length, 0); assert.equal(h.timers.length, 0);
+  assert.equal(rt.shared['cairn.mode'], 'dock');
+  assert.equal(rt.shared['cairn.target'].machine, 'vps');
+  assert.ok(findNode(rt.trees[rt.shared.layout], 'cairn-toolbar'));
+  const float = harness(runtime());
+  assert.equal(float.focusCalls(), 1); assert.equal(float.rt.commands.length, 0);
+});
+
+test('toolbar composition preserves native tabs content, slot paint, drag and stack identity', () => {
+  const h = harness(); const tree = layoutFixture();
+  const bar = findNode(tree, 'tabs');
+  Object.assign(bar, { min: 22, max: 50, window_drag: true, background: 'chrome', border: { width: 1, color: 'border' } });
+  bar.content.props = { custom: 'preserved' };
+  const original = copy(bar);
+  tree.children[1].children[0] = { id: 'top-stack', type: 'stack', active: 'tabs', children: [bar] };
+  tree.children.push({ id: 'cairn-toolbar' }, { id: 'cairn-tabs' });
+  const result = h.dockPlan(tree).layout;
+  const row = findNode(result, 'tabs');
+  for (const key of ['id', 'size', 'min', 'max', 'window_drag', 'background', 'border']) assert.deepEqual(copy(row[key]), original[key]);
+  assert.equal(findNode(result, 'top-stack').active, 'tabs');
+  assert.deepEqual(copy(row.children[0].content), original.content);
+  assert.equal(row.children[0].id, 'cairn-tabs-2'); assert.equal(row.children[1].id, 'cairn-toolbar-2');
+  assert.equal(row.children[1].size.px, 84);
+  assert.deepEqual(bar, original);
+  assert.equal(h.dockPlan(result).layout, undefined);
+});
+
+test('existing dock without toolbar upgrades via exclusive new copy and keeps original intact', async () => {
+  const rt = personalRuntime(); const tree = rt.trees.work;
+  tree.children.push({ id: 'old-dock', type: 'block', hidden: true, size: { px: 515 }, content: { mod: 'cairn', props: { cairnMode: 'dock' } } });
+  const before = copy(tree); const originalFile = rt.disk['/app/layouts/work.json'];
+  const h = harness(rt); h.mod.switchMode(h.cx); await settle(h);
+  assert.deepEqual(rt.trees.work, before); assert.equal(rt.disk['/app/layouts/work.json'], originalFile);
+  assert.deepEqual(rt.commands.map(c => c.name), ['layout.switch']);
+  const next = rt.trees[rt.shared.layout];
+  assert.equal(h.dockNode(next).id, 'old-dock'); assert.equal(h.dockNode(next).size.px, 515);
+  assert.equal(h.dockNode(next).hidden, undefined); assert.ok(findNode(next, 'cairn-toolbar'));
+});
+
+test('custom or ambiguous tabs fail without writes and default router offers Float', async () => {
+  for (const multiple of [false, true]) {
+    const tree = layoutFixture();
+    if (multiple) tree.children.push({ id: 'other-tabs', type: 'block', content: { mod: 'tabs' } });
+    else findNode(tree, 'tabs').content.mod = 'custom-tabs';
+    const rt = runtime(tree); delete rt.shared['cairn.mode'];
+    const h = harness(rt); await settle(h);
+    assert.match(h.mod.modeError, /native tabs/);
+    assert.equal(h.mod.routeFailed, true); assert.equal(h.focusCalls(), 1);
+    assert.equal(rt.events.some(e => e.kind === 'write-start'), false); assert.deepEqual(rt.commands, []);
+    h.mod.switchMode(h.cx); assert.equal(rt.shared['cairn.mode'], 'float');
+  }
+});
+
+function toolbarButton(h) { return h.mod.render(h.cx).nodes[0]; }
+
+test('toolbar has no query, timer or focus handle and invokes the existing toggle path', async () => {
+  const rt = runtime(); rt.focus = { terminal: 'vps/t2', cwd: '/remote/repo' };
+  const h = harness(rt, { cairnMode: 'toolbar' });
+  assert.equal(h.mod.handle, undefined); assert.equal(h.focusCalls(), 0);
+  assert.equal(h.requests.length, 0); assert.equal(h.timers.length, 0); assert.equal(h.tasks.length, 0);
+  const button = toolbarButton(h); let stopped = false;
+  button.attrs.on_mouse_down[1]({}, { stop_propagation() { stopped = true; } }); assert.ok(stopped);
+  button.attrs.on_click[0]();
+  assert.deepEqual(rt.commands, [{ name: 'mod.open', args: { name: 'cairn' } }]);
+  assert.equal(rt.focus.terminal, 'vps/t2'); assert.equal(rt.shared['cairn.mode'], 'float');
+});
+
+test('toolbar highlights actual dock visibility including hidden ancestors and inactive stacks', () => {
+  const rt = runtime(); const h = harness(rt, { cairnMode: 'toolbar' });
+  const dock = { id: 'dock', type: 'block', content: { mod: 'cairn', props: { cairnMode: 'dock' } } };
+  const stack = { id: 'panels', type: 'stack', active: 'dock', children: [{ id: 'other' }, dock] };
+  rt.trees.main = { id: 'root', type: 'row', children: [stack] };
+  assert.equal(toolbarButton(h).attrs.bg[0], 'selected');
+  stack.hidden = true; assert.equal(toolbarButton(h).attrs.bg[0], 'chrome');
+  stack.hidden = false; stack.active = 'other'; assert.equal(toolbarButton(h).attrs.bg[0], 'chrome');
+  stack.children[0].hidden = true; stack.active = 'stale'; assert.equal(toolbarButton(h).attrs.bg[0], 'selected');
+  dock.hidden = true; assert.equal(toolbarButton(h).attrs.bg[0], 'chrome');
+});
+
+test('toolbar float highlight follows live acknowledgement, native close and restart', async () => {
+  const rt = runtime(); const toolbar = harness(rt, { cairnMode: 'toolbar' });
+  const floating = harness(rt); floating.mod.render(floating.cx);
+  assert.equal(toolbarButton(toolbar).attrs.bg[0], 'selected');
+  const reload = harness(rt, { cairnMode: 'toolbar' });
+  assert.equal(toolbarButton(reload).attrs.bg[0], 'chrome');
+  floating.mod.render(floating.cx); assert.equal(toolbarButton(reload).attrs.bg[0], 'selected');
+  const persisted = copy(rt.shared);
+  await floating.mod.close(floating.cx);
+  assert.equal(toolbarButton(reload).attrs.bg[0], 'chrome');
+  floating.mod.render(floating.cx); assert.equal(toolbarButton(reload).attrs.bg[0], 'chrome');
+  const restarted = runtime(); restarted.shared = persisted;
+  const afterRestart = harness(restarted, { cairnMode: 'toolbar' });
+  assert.equal(toolbarButton(afterRestart).attrs.bg[0], 'chrome');
+  const reopened = harness(restarted); reopened.mod.render(reopened.cx);
+  assert.equal(toolbarButton(afterRestart).attrs.bg[0], 'selected');
+  reopened.mod.closePanel(); assert.equal(toolbarButton(afterRestart).attrs.bg[0], 'chrome');
+});
+
+test('persistent toolbar toggles dock then latest Float without duplicate layouts or target loss', async () => {
+  const rt = runtime(); delete rt.shared['cairn.mode'];
+  rt.focus = { terminal: 'vps/t2', cwd: '/remote/repo' };
+  const first = harness(rt); await settle(first);
+  const tree = rt.trees[rt.shared.layout]; const dock = first.dockNode(tree);
+  const toolbar = harness(rt, { cairnMode: 'toolbar' });
+  assert.equal(toolbarButton(toolbar).attrs.bg[0], 'selected');
+  toolbarButton(toolbar).attrs.on_click[0](); await settle(toolbar);
+  const router = harness(rt); await settle(router);
+  assert.equal(dock.hidden, true); assert.ok(findNode(tree, 'cairn-toolbar'));
+  assert.equal(toolbarButton(toolbar).attrs.bg[0], 'chrome');
+  toolbarButton(toolbar).attrs.on_click[0](); await settle(toolbar);
+  const router2 = harness(rt); await settle(router2); assert.equal(dock.hidden, false);
+  const panel = harness(rt, { cairnMode: 'dock' }); panel.mod.switchMode(panel.cx); await settle(panel);
+  rt.focus = null; const float = harness(rt); float.mod.render(float.cx);
+  assert.equal(float.mod.target.machine, 'vps'); assert.equal(float.mod.target.cwd, '/remote/repo');
+  assert.equal(toolbarButton(toolbar).attrs.bg[0], 'selected');
+  toolbarButton(toolbar).attrs.on_click[0](); await settle(toolbar); await float.mod.close(float.cx);
+  assert.equal(rt.overlays.has('mod-cairn'), false); assert.equal(toolbarButton(toolbar).attrs.bg[0], 'chrome');
+  assert.equal(rt.commands.filter(c => c.name === 'layout.switch').length, 1);
+});
+
+test('toolbar reopen reveals a reused dock behind a hidden ancestor and inactive stack', async () => {
+  const rt = runtime(); const initial = harness(rt);
+  const tree = initial.dockPlan(rt.trees.main).layout;
+  const dock = initial.dockNode(tree);
+  const row = findNode(tree, 'cairn-work'); row.children.pop();
+  tree.children.push({ id: 'hidden-parent', type: 'column', hidden: true, children: [
+    { id: 'dock-stack', type: 'stack', active: 'other', children: [{ id: 'other' }, dock] },
+  ] });
+  rt.trees.main = tree; rt.shared['cairn.mode'] = 'dock';
+  const toolbar = harness(rt, { cairnMode: 'toolbar' });
+  assert.equal(toolbarButton(toolbar).attrs.bg[0], 'chrome');
+  const router = harness(rt); await settle(router);
+  assert.equal(toolbarButton(toolbar).attrs.bg[0], 'selected');
+  assert.equal(rt.commands.some(c => c.name === 'layout.switch' || c.name === 'layout.set'), false);
+  assert.equal(router.requests.length, 0); assert.equal(router.focusCalls(), 0);
+});
+
+test('source tab labels stay fixed, rename live, and preserve unnamed remote labels on handoff', async () => {
+  const h = harness();
+  const header = h.mod.render(h.cx).nodes[0].nodes[1];
+  assert.equal(header.nodes[0], 'cairn-preview');
+  assert.deepEqual(header.attrs.tooltip, ['t1']);
+  h.focus({ terminal: 'vps/t2', tab: 'vps/tb2', cwd: '/remote/repo' });
+  h.rt.spaces[0].tabs[0].name = 'renamed';
+  assert.equal(h.mod.render(h.cx).nodes[0].nodes[1].nodes[0], 'renamed');
+  h.mod.switchMode(h.cx); await settle(h);
+  const dock = harness(h.rt, { cairnMode: 'dock' });
+  assert.equal(dock.mod.target.tab, 'tb1');
+  assert.equal(dock.mod.target.label, 'renamed');
+  dock.mod.closePanel(); await settle(dock);
+  const router = harness(h.rt); await settle(router);
+  dock.mod.render(dock.cx);
+  assert.equal(dock.mod.target.tab, 'vps/tb2');
+  const remoteHeader = dock.mod.render(dock.cx).nodes[0].nodes[0].nodes[1];
+  assert.equal(remoteHeader.nodes[0], 'vps/2');
+  assert.deepEqual(remoteHeader.attrs.tooltip, ['vps/t2']);
+  dock.mod.switchMode(dock.cx); await settle(dock);
+  const float = harness(h.rt);
+  assert.equal(float.mod.target.label, '2');
+  assert.equal(float.mod.target.machine, 'vps');
+});
+
+test('hidden persistent dock does not fetch or adopt focus and toolbar reopen selects B', async () => {
+  const h = harness(); h.mod.switchMode(h.cx); await settle(h);
+  const dock = harness(h.rt, { cairnMode: 'dock' });
+  dock.requests[0].resolve(empty); await dock.tasks[0];
+  dock.mod.closePanel(); await settle(dock);
+  const before = copy(h.rt.shared['cairn.target']);
+  h.focus({ terminal: 'vps/t2', cwd: '/remote/repo' });
+  dock.mod.render(dock.cx); dock.timers[0](dock.cx);
+  assert.equal(dock.requests.length, 1);
+  assert.deepEqual(h.rt.shared['cairn.target'], before);
+  const toolbar = harness(h.rt, { cairnMode: 'toolbar' });
+  toolbarButton(toolbar).attrs.on_click[0](); await settle(toolbar);
+  const router = harness(h.rt); await settle(router);
+  dock.mod.render(dock.cx);
+  assert.equal(dock.mod.target.terminal, 't2');
+  assert.equal(dock.requests[1].options.on, 'vps');
+  dock.requests[1].resolve(empty); await dock.tasks[1];
+});
+
+test('external dock hide (CLI close) followed by mod.open captures a fresh source', async () => {
+  const h = harness(); h.mod.switchMode(h.cx); await settle(h);
+  const dock = harness(h.rt, { cairnMode: 'dock' });
+  h.rt.queue.push({ name: 'layout.hide', args: { id: h.dockNode(h.rt.trees[h.rt.shared.layout]).id } });
+  h.rt.flush();
+  h.focus({ terminal: 'vps/t2', cwd: '/remote/repo' });
+  dock.timers[0](dock.cx);
+  assert.equal(dock.requests.length, 1);
+  const router = harness(h.rt); await settle(router);
+  dock.mod.render(dock.cx);
+  dock.requests[0].resolve({ ...empty, stdout: '{"trail":null,"prs":[{"ref":"old"}]}' });
+  await dock.tasks[0];
+  assert.equal(dock.mod.data, null);
+  assert.equal(dock.requests[1].options.on, 'vps');
+  dock.requests[1].resolve(empty); await dock.tasks[1];
+  assert.equal(dock.mod.data.prs.length, 0);
+});
+
+test('visible views restore the source on reload even with B focused', async () => {
+  for (const docked of [false, true]) {
+    const h = harness();
+    if (docked) { h.mod.switchMode(h.cx); await settle(h); }
+    h.focus({ terminal: 'vps/t2', cwd: '/remote/repo' });
+    const reloaded = harness(h.rt, docked ? { cairnMode: 'dock' } : { overlay: 'mod-cairn' });
+    assert.equal(reloaded.mod.target.terminal, 't1');
+    assert.equal(reloaded.mod.target.label, 'cairn-preview');
+    assert.equal(reloaded.requests[0].args[2], 'hc-t1');
+  }
+});
+
+test('missing source clears cached data, rejects pending data and never follows another terminal', async () => {
+  const h = harness();
+  h.requests[0].resolve(empty); await h.tasks[0];
+  h.mod.refresh(h.cx);
+  h.rt.terminals = h.rt.terminals.filter(t => t.address !== 't1');
+  h.rt.panes = h.rt.panes.filter(p => p.terminal !== 't1');
+  h.focus({ terminal: 'vps/t2', cwd: '/remote/repo' });
+  h.mod.render(h.cx);
+  assert.equal(h.mod.data, null);
+  assert.match(h.mod.error, /Source terminal unavailable/);
+  h.requests[1].resolve({ ...empty, stdout: '{"trail":null,"prs":[{"ref":"stale"}]}' });
+  await h.tasks[1]; h.mod.refresh(h.cx);
+  assert.equal(h.mod.data, null);
+  assert.equal(h.requests.length, 2);
+  assert.equal(h.mod.target.terminal, 't1');
+  h.rt.terminals.push({ address: 't1', cwd: '/api' });
+  h.mod.refresh(h.cx); h.requests[2].resolve(empty); await h.tasks[2];
+  assert.equal(h.mod.error, '');
+});
+
+test('fresh empty focus never revives a closed source or adopts later focus', async () => {
+  const h = harness(); await h.mod.close(h.cx);
+  h.focus(null);
+  const reopened = harness(h.rt);
+  assert.equal(reopened.mod.target, null);
+  reopened.focus({ terminal: 'vps/t2', cwd: '/remote/repo' });
+  reopened.mod.render(reopened.cx); reopened.mod.refresh(reopened.cx);
+  assert.equal(reopened.mod.target, null);
+  assert.equal(reopened.requests.length, 0);
+});
+
+test('layout terminal without a source pane never borrows the focused tab label', () => {
+  const h = openAt({ terminal: 't3', tab: 'vps/tb2', cwd: '/local/repo' });
+  assert.equal(h.mod.target.tab, null);
+  const header = h.mod.render(h.cx).nodes[0].nodes[1];
+  assert.equal(header.nodes[0], 'Terminal');
+  assert.deepEqual(header.attrs.tooltip, ['t3']);
+});
+
+test('old floating teardown after replacement cannot clear the restored source', async () => {
+  const h = harness();
+  h.focus({ terminal: 'vps/t2', cwd: '/remote/repo' });
+  const replacement = harness(h.rt);
+  const version = h.rt.shared['cairn.target'].version;
+  await h.mod.close(h.cx);
+  assert.equal(h.rt.shared['cairn.target'].version, version);
+  assert.equal(h.rt.shared['cairn.target'].presentation, 'float');
+  replacement.requests[0].resolve(empty); await replacement.tasks[0];
+  assert.equal(replacement.mod.target.terminal, 't1');
+  assert.ok(replacement.mod.data);
+});
+
+test('fixed source follows live cwd and discards pending results from the old folder', async () => {
+  const h = harness();
+  const original = h.mod.target;
+  h.focus({ terminal: 'vps/t2', cwd: '/wrong' });
+  h.rt.terminals.find(t => t.address === 't1').cwd = '/web';
+  h.mod.refresh(h.cx);
+  assert.notEqual(h.mod.target, original);
+  assert.equal(original.cwd, '/api');
+  assert.equal(h.requests.length, 1);
+  h.requests[0].resolve({ ...empty, stdout: '{"trail":null,"prs":[{"ref":"old folder"}]}' });
+  await h.tasks[0];
+  assert.equal(h.mod.data, null);
+  assert.deepEqual(Array.from(h.requests[1].args), ['show', '--pane', 'hc-t1', '--json', '--dir', '/web']);
+  assert.equal(h.requests[1].options.on, null);
+  assert.equal(h.rt.shared['cairn.target'].cwd, '/web');
+  h.requests[1].resolve(empty); await h.tasks[1];
+  assert.ok(h.mod.data);
+});
+
+test('source pane live cwd takes precedence over the terminal startup directory', async () => {
+  const rt = runtime();
+  rt.focus = { terminal: 't1', cwd: '/current' };
+  rt.panes[0].cwd = '/current';
+  rt.terminals[0].cwd = '/startup';
+  const h = harness(rt);
+  assert.equal(h.requests[0].args.at(-1), '/current');
+  h.focus({ terminal: 'vps/t2', cwd: '/wrong' });
+  rt.panes[0].cwd = '/next';
+  h.requests[0].resolve(empty); await h.tasks[0];
+  assert.equal(h.mod.data, null);
+  assert.equal(h.requests[1].args.at(-1), '/next');
+  h.requests[1].resolve(empty); await h.tasks[1];
+  rt.panes[0].cwd = null;
+  h.mod.refresh(h.cx);
+  assert.equal(h.requests[2].args.includes('--dir'), false);
+});
+
+test('a source without a pane uses its foreground cwd before its startup directory', () => {
+  const rt = runtime();
+  rt.focus = { terminal: 'vps/t2', cwd: '/current' };
+  rt.panes = [];
+  rt.terminals[1].foreground = { cwd: '/current' };
+  const h = harness(rt);
+  assert.equal(h.requests[0].args.at(-1), '/current');
+  assert.equal(h.requests[0].options.on, 'vps');
+});
+
+test('cwd changes before a reply are detected without a render or timer tick', async () => {
+  const h = harness();
+  h.rt.terminals.find(t => t.address === 't1').cwd = '/web';
+  h.requests[0].resolve({ ...empty, stdout: '{"trail":null,"prs":[{"ref":"old folder"}]}' });
+  await h.tasks[0];
+  assert.equal(h.mod.data, null);
+  assert.equal(h.requests[1].args.at(-1), '/web');
+  h.requests[1].resolve(empty); await h.tasks[1];
+  assert.ok(h.mod.data);
+});
+
+test('null or unknown live cwd disables stale folder fallback, including remote sources', async () => {
+  for (const cwd of [null, undefined, '']) {
+    const h = openAt({ terminal: 'vps/t2', cwd: '/remote/repo' });
+    h.requests[0].resolve(empty); await h.tasks[0];
+    h.focus({ terminal: 't1', cwd: '/wrong' });
+    h.rt.terminals.find(t => t.address === 'vps/t2').cwd = cwd;
+    h.mod.refresh(h.cx);
+    assert.equal(h.mod.data, null);
+    assert.equal(h.mod.target.cwd, null);
+    assert.equal(h.rt.shared['cairn.target'].cwd, null);
+    assert.deepEqual(Array.from(h.requests[1].args), ['show', '--pane', 'hc-t2', '--json']);
+    assert.equal(h.requests[1].options.on, 'vps');
+    h.requests[1].resolve(empty); await h.tasks[1];
+  }
+});
+
+test('fixed remote source follows tab moves and renames without borrowing current tab metadata', async () => {
+  const h = openAt({ terminal: 'vps/t2', cwd: '/remote/repo' });
+  h.focus({ terminal: 't1', tab: 'tb1', cwd: '/api' });
+  h.rt.panes = h.rt.panes.filter(p => p.terminal !== 'vps/t2');
+  h.mod.render(h.cx);
+  assert.equal(h.mod.target.tab, 'vps/tb2'); // Parked or shown elsewhere: membership is unknown.
+  assert.equal(h.mod.target.label, '2');
+  h.rt.panes.push({ terminal: 'vps/t2', tab: 'vps/tb3' });
+  h.mod.render(h.cx);
+  assert.equal(h.mod.target.tab, 'vps/tb3');
+  assert.equal(h.mod.target.label, null); // The new tab's metadata has not arrived.
+  h.rt.spaces[0].tabs.push({ id: 'vps/tb3', name: 'moved' });
+  let header = h.mod.render(h.cx).nodes[0].nodes[1];
+  assert.equal(header.nodes[0], 'vps/moved');
+  assert.deepEqual(header.attrs.tooltip, ['vps/t2']);
+  h.rt.spaces[0].tabs.at(-1).name = 'renamed';
+  header = h.mod.render(h.cx).nodes[0].nodes[1];
+  assert.equal(header.nodes[0], 'vps/renamed');
+  assert.equal(h.rt.shared['cairn.target'].tab, 'vps/tb3');
+  assert.equal(h.rt.shared['cairn.target'].label, 'renamed');
+  h.mod.switchMode(h.cx); await settle(h);
+  const dock = harness(h.rt, { cairnMode: 'dock' });
+  assert.equal(dock.mod.target.tab, 'vps/tb3');
+  assert.equal(dock.mod.target.label, 'renamed');
+  assert.equal(dock.requests[0].options.on, 'vps');
+});

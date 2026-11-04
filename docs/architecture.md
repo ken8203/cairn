@@ -13,7 +13,7 @@ internal/session     agent and pane ids, session files, pane pointers, auto-crea
 internal/hook        agent hook payloads, and what a Bash command touched to record
 internal/host        the terminal cairn runs in: pane keys, labels, pane titles, the panel
 internal/orca        Orca worktree cards kept in sync with their trails
-internal/setup       setup through the agents' plugin CLIs, herdr's plugin, and doctor's checks
+internal/setup       agent plugin CLIs, herdr's plugin, embedded Herdr.app mod, doctor's checks
 internal/skills      the guides `cairn skills` prints, embedded
 internal/ui          show, ls, the statusline and the panel
 ```
