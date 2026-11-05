@@ -42,10 +42,9 @@ type host struct {
 	panel func(body string, w watch, close bool) error
 }
 
-// hosts in detection order, innermost first: herdr usually runs inside another terminal
-// or tmux, tmux inside a terminal app, and either may run in Herdr.app. Any other
-// terminal has no panes. Rex, which has no prefix, comes last.
-var hosts = []host{herdr, tmux, hc, orca, rex}
+// hosts in detection order. Any other terminal has no panes. Rex, which has no prefix,
+// comes last.
+var hosts = []host{hc, rex}
 
 var unsafeName = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 
@@ -102,8 +101,8 @@ func Label() string {
 	return h.label()
 }
 
-// named is a tab's name, or empty for one still called by its number, as herdr and
-// Herdr.app call a tab nobody named.
+// named is a tab's name, or empty for one still called by its number, as Herdr.app
+// calls a tab nobody named.
 func named(name string) string {
 	if strings.Trim(name, "0123456789") == "" {
 		return ""
@@ -242,9 +241,6 @@ func (w watch) argv() []string {
 	return argv
 }
 
-// errNoPane is a panel's error for a key that names no pane in its host.
-func errNoPane(h, body string) error { return fmt.Errorf("%s: no pane in %q", h, body) }
-
 // cli runs a host's CLI with stdin, failing on the first line it printed about the error.
 func cli(stdin, name string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), cliTimeout)
@@ -260,13 +256,4 @@ func cli(stdin, name string, args ...string) ([]byte, error) {
 		return out, fmt.Errorf("%s %s: %s", name, args[0], line)
 	}
 	return out, nil
-}
-
-// shellJoin quotes each word for sh.
-func shellJoin(words ...string) string {
-	quoted := make([]string, len(words))
-	for i, w := range words {
-		quoted[i] = "'" + strings.ReplaceAll(w, "'", `'\''`) + "'"
-	}
-	return strings.Join(quoted, " ")
 }

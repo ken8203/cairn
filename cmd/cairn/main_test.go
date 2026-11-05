@@ -22,7 +22,7 @@ import (
 func testApp(t *testing.T, known map[string]github.PR) ui.App {
 	t.Helper()
 	dir := t.TempDir()
-	for _, k := range []string{"CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID", "REX_BLOCK", "TMUX_PANE", "HERDR_PANE_ID", "HC_TERMINAL_ID", "ORCA_TERMINAL_HANDLE"} {
+	for _, k := range []string{"CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID", "REX_BLOCK", "HC_TERMINAL_ID"} {
 		t.Setenv(k, "")
 	}
 	app := newApp(filepath.Join(dir, "cairn"))
@@ -225,9 +225,7 @@ func TestCLIErrors(t *testing.T) {
 		{"s1", []string{"use", "a b"}, "trail names use letters, digits, '.', '_' and '-'"},
 		{"", []string{"edit"}, "usage: cairn edit <name>"},
 		{"", []string{"nope"}, "unknown command 'nope'; see `cairn --help`"},
-		{"", []string{"watch", "--from-env"}, "cairn watch --from-env: no CAIRN_PANE"},
 	}
-	t.Setenv("CAIRN_PANE", "")
 	for _, tt := range tests {
 		t.Setenv("CLAUDE_CODE_SESSION_ID", tt.session)
 		if err := run(app, tt.args); err == nil || err.Error() != tt.want {
@@ -310,7 +308,7 @@ func cairnEnv(t *testing.T, env ...string) []string {
 	dir := t.TempDir()
 	base := slices.DeleteFunc(os.Environ(), func(kv string) bool {
 		k, _, _ := strings.Cut(kv, "=")
-		return slices.Contains([]string{"CAIRN_HOME", "CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID", "REX_BLOCK", "TMUX_PANE", "HERDR_PANE_ID", "HC_TERMINAL_ID", "ORCA_TERMINAL_HANDLE"}, k)
+		return slices.Contains([]string{"CAIRN_HOME", "CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID", "REX_BLOCK", "HC_TERMINAL_ID"}, k)
 	})
 	return slices.Concat(base, []string{"CAIRN_HOME=" + dir}, env)
 }
@@ -364,11 +362,11 @@ func TestPanel(t *testing.T) {
 	}
 	// A host whose CLI fails: one line on stderr and exit 1.
 	cmd = exec.Command(bin, "panel")
-	cmd.Env = cairnEnv(t, "ORCA_TERMINAL_HANDLE=term_1", "PATH="+t.TempDir())
+	cmd.Env = cairnEnv(t, "REX_BLOCK=block:b1", "REX_BIN_DIR=", "PATH="+t.TempDir())
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	err = cmd.Run()
-	if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 || strings.Count(stderr.String(), "\n") != 1 || !strings.HasPrefix(stderr.String(), "cairn: orca terminal: ") {
+	if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 || strings.Count(stderr.String(), "\n") != 1 || !strings.HasPrefix(stderr.String(), "cairn: rex do: ") {
 		t.Errorf("panel = %v, stderr %q", err, stderr.String())
 	}
 }
@@ -461,96 +459,6 @@ func TestWriteErrorsNameFolderTrail(t *testing.T) {
 		if err := run(app, strings.Fields(args)); err == nil || err.Error() != "this session has no trail; run `cairn use <name>` first" {
 			t.Errorf("%q outside the repo: %v", args, err)
 		}
-	}
-}
-
-// fakeOrca puts an orca on PATH that lists the worktrees at paths and logs every call
-// that changes a card to the returned file.
-func fakeOrca(t *testing.T, paths ...string) string {
-	t.Helper()
-	dir := t.TempDir()
-	var wts []string
-	for _, p := range paths {
-		wts = append(wts, `{"id":"d058::`+p+`","repoId":"d058","path":"`+p+`","branch":"refs/heads/feat/x","comment":"","linkedPR":0,"isMainWorktree":false}`)
-	}
-	os.WriteFile(filepath.Join(dir, "list.json"), []byte(`{"result":{"totalCount":1,"truncated":false,"worktrees":[`+strings.Join(wts, ",")+`]}}`), 0o644)
-	script := `#!/bin/sh
-case "$1 $2" in
-"status --json") echo '{"result":{"runtime":{"reachable":true}}}' ;;
-"worktree list") cat "` + dir + `/list.json" ;;
-*) echo "$*" >> "` + dir + `/log" ;;
-esac
-`
-	if err := os.WriteFile(filepath.Join(dir, "orca"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	return filepath.Join(dir, "log")
-}
-
-func TestOrcaSyncSpawned(t *testing.T) {
-	const u = "https://github.com/acme/api/pull/120"
-	app := testApp(t, map[string]github.PR{u: {Number: 120, State: "OPEN"}})
-	var spawned []string
-	app.Spawn = func(args ...string) error {
-		spawned = append(spawned, strings.Join(args, " "))
-		return nil
-	}
-	t.Setenv("CLAUDE_CODE_SESSION_ID", "s1")
-	app.Sessions.Bind("s1", "t")
-
-	// Without Orca, nothing is started.
-	t.Setenv("PATH", t.TempDir())
-	t.Setenv("HOME", t.TempDir())
-	if err := run(app, []string{"add", "release"}); err != nil || len(spawned) > 0 {
-		t.Fatalf("without orca: %v, spawned %q", err, spawned)
-	}
-
-	fakeOrca(t)
-	if err := run(app, []string{"add", "flag on"}); err != nil || !slices.Equal(spawned, []string{"__orca"}) {
-		t.Fatalf("add: %v, spawned %q", err, spawned)
-	}
-	// While that sync holds its lock, a burst asks it to run again instead.
-	if err := run(app, []string{"done", "1"}); err != nil || len(spawned) != 1 {
-		t.Fatalf("done: %v, spawned %q", err, spawned)
-	}
-	if _, err := os.Stat(orcaAgain(app)); err != nil {
-		t.Errorf("no mark to run again: %v", err)
-	}
-	app.Cache.Unlock(orcaLock)
-	if err := run(app, []string{"done", "1"}); err != nil || len(spawned) != 2 {
-		t.Fatalf("done after the sync: %v, spawned %q", err, spawned)
-	}
-	app.Cache.Unlock(orcaLock)
-	if err := record(app, "s1", recordArgs([]string{"--own", u})); err != nil || len(spawned) != 3 {
-		t.Fatalf("record: %v, spawned %q", err, spawned)
-	}
-	// A failed change starts nothing.
-	app.Cache.Unlock(orcaLock)
-	if err := run(app, []string{"done", "9"}); err == nil || len(spawned) != 3 {
-		t.Errorf("failed done: %v, spawned %q", err, spawned)
-	}
-}
-
-// The detached sync decorates the worktree on a trail and leaves one on none alone.
-func TestOrcaSync(t *testing.T) {
-	bin, err := build()
-	if err != nil {
-		t.Fatal(err)
-	}
-	env := cairnEnv(t)
-	i := slices.IndexFunc(env, func(kv string) bool { return strings.HasPrefix(kv, "CAIRN_HOME=") })
-	app := newApp(strings.TrimPrefix(env[i], "CAIRN_HOME="))
-	repo := folderRepo(t, app)
-	log := fakeOrca(t, repo, t.TempDir())
-	cmd := exec.Command(bin, "__orca")
-	cmd.Env = append(env, "PATH="+os.Getenv("PATH"))
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("__orca: %v\n%s", err, out)
-	}
-	want := []string{"worktree set --worktree path:" + repo + " --pr 1 --comment cairn · t 0/2 ▶ r#1 --json"}
-	if got := readURLs(log); !slices.Equal(got, want) {
-		t.Errorf("orca calls %q, want %q", got, want)
 	}
 }
 

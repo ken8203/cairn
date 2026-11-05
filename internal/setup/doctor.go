@@ -60,10 +60,6 @@ type Env struct {
 	Trail             func(session string) string
 	// Hooked says whether the agent session ran cairn's hook, which it loads only at start.
 	Hooked func(session string) bool
-	// Orca says how many Orca worktrees are on trails, or that Orca isn't installed.
-	Orca func() string
-	// Home is cairn's state folder, where setup writes herdr's plugin.
-	Home string
 }
 
 // plugin is an installed plugin as an agent's plugin list shows it.
@@ -228,7 +224,6 @@ func (s agentState) check() Check {
 type probe struct {
 	path, gh Check
 	agents   []agentState
-	herdr    herdrState
 }
 
 // probeAll runs the checks, the agents' and gh's at the same time.
@@ -236,7 +231,6 @@ func probeAll(withMarketplace bool) probe {
 	p := probe{path: pathCheck(), agents: make([]agentState, len(agents))}
 	var wg sync.WaitGroup
 	wg.Go(func() { p.gh = ghCheck() })
-	wg.Go(func() { p.herdr = probeHerdr() })
 	for i, a := range agents {
 		wg.Go(func() { p.agents[i] = probeAgent(a, withMarketplace) })
 	}
@@ -254,9 +248,6 @@ func (p probe) checks(env Env) []Check {
 		if a.hooks != nil {
 			cs = append(cs, a.trust)
 		}
-	}
-	if p.herdr.present {
-		cs = append(cs, p.herdr.check())
 	}
 	if onPath("herdr-app") {
 		cs = append(cs, herdrAppCheck())
@@ -276,11 +267,11 @@ func (p probe) checks(env Env) []Check {
 			s.Detail += "; cairn's hook hasn't run in this session"
 		}
 	}
-	return append(cs, h, s, Check{Check: "orca", Status: OK, Detail: env.Orca()})
+	return append(cs, h, s)
 }
 
 // Doctor checks cairn's install, changing nothing: this binary on PATH, gh, the plugin in
-// each agent on PATH and in herdr, and where cairn runs.
+// each agent on PATH, the Herdr.app mod, and where cairn runs.
 func Doctor(env Env) []Check { return probeAll(false).checks(env) }
 
 // Failed reports whether any check failed.

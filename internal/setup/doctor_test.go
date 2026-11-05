@@ -39,20 +39,6 @@ esac
 echo "gh $*" >> "$FAKE/log"
 [ -e "$FAKE/gh-authed" ]
 `
-	fakeHerdr = `#!/bin/sh
-echo "herdr $*" >> "$FAKE/log"
-case "$*" in
-"plugin list --plugin cairn --json")
-	if [ -e "$FAKE/herdr-root" ]; then
-		root=$(/bin/cat "$FAKE/herdr-root")
-		cairn=$(/usr/bin/awk -F'"' '/^command = \[/ && /"panel"\]$/ {print $2; exit}' "$root/herdr-plugin.toml")
-		enabled=$(/bin/cat "$FAKE/herdr-enabled" 2>/dev/null || echo true)
-		echo "{\"result\":{\"plugins\":[{\"plugin_id\":\"cairn\",\"enabled\":$enabled,\"plugin_root\":\"$root\",\"actions\":[{\"id\":\"panel\",\"command\":[\"$cairn\",\"panel\"]}]}]}}"
-	else echo '{"result":{"plugins":[]}}'; fi ;;
-"plugin link "*) shift 2; echo "$*" > "$FAKE/herdr-root" ;;
-*) echo "unexpected: $*" >&2; exit 2 ;;
-esac
-`
 	trusted = `[hooks.state."cairn@cairn:hooks/hooks.json:session_start:0:0"]
 trusted_hash = "sha256:aa"
 
@@ -68,7 +54,7 @@ func fakes(t *testing.T, names ...string) string {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "bin")
 	os.Mkdir(bin, 0o755)
-	scripts := map[string]string{"claude": fakeClaude, "codex": fakeCodex, "gh": fakeGh, "herdr": fakeHerdr}
+	scripts := map[string]string{"claude": fakeClaude, "codex": fakeCodex, "gh": fakeGh}
 	for _, name := range names {
 		if err := os.WriteFile(filepath.Join(bin, name), []byte(scripts[name]), 0o755); err != nil {
 			t.Fatal(err)
@@ -102,7 +88,6 @@ var nowhere = Env{
 	Agent:  func() string { return "" },
 	Trail:  func(string) string { return "" },
 	Hooked: func(string) bool { return false },
-	Orca:   func() string { return "not installed" },
 }
 
 func agentCheck(name string) Check {
@@ -145,7 +130,7 @@ func TestDoctorPlugins(t *testing.T) {
 	for _, c := range Doctor(nowhere) {
 		names = append(names, c.Check)
 	}
-	if want := []string{"path", "gh", "codex-plugin", "codex-hooks", "host", "session", "orca"}; !slices.Equal(names, want) {
+	if want := []string{"path", "gh", "codex-plugin", "codex-hooks", "host", "session"}; !slices.Equal(names, want) {
 		t.Errorf("doctor without claude: %q", names)
 	}
 }
@@ -158,23 +143,22 @@ func TestDoctorWhere(t *testing.T) {
 		Agent:  func() string { return "s1" },
 		Trail:  func(id string) string { return "t-" + id },
 		Hooked: func(string) bool { return true },
-		Orca:   func() string { return "2 worktrees on cairn trails" },
 	}
 	cs := Doctor(env)
-	if got := cs[len(cs)-3:]; got[0].String() != "ok host: Rex, pane p1" || got[1].String() != "ok session: s1, on trail t-s1" || got[2].String() != "ok orca: 2 worktrees on cairn trails" {
+	if got := cs[len(cs)-2:]; got[0].String() != "ok host: Rex, pane p1" || got[1].String() != "ok session: s1, on trail t-s1" {
 		t.Errorf("got %v", got)
 	}
 	env.Trail = func(string) string { return "" }
-	if got := Doctor(env); got[len(got)-2].String() != "ok session: s1, no trail yet" {
-		t.Errorf("no trail: %v", got[len(got)-2])
+	if got := Doctor(env); got[len(got)-1].String() != "ok session: s1, no trail yet" {
+		t.Errorf("no trail: %v", got[len(got)-1])
 	}
 	// A session started before cairn's plugin was installed never ran its hook.
 	env.Hooked = func(string) bool { return false }
-	if got := Doctor(env); got[len(got)-2].String() != "warn session: s1, no trail yet; cairn's hook hasn't run in this session; fix: restart this agent session to load cairn's hooks" {
-		t.Errorf("not hooked: %v", got[len(got)-2])
+	if got := Doctor(env); got[len(got)-1].String() != "warn session: s1, no trail yet; cairn's hook hasn't run in this session; fix: restart this agent session to load cairn's hooks" {
+		t.Errorf("not hooked: %v", got[len(got)-1])
 	}
 	cs = Doctor(nowhere)
-	if got := cs[len(cs)-3:]; got[0].String() != "ok host: no terminal host with panes" || got[1].String() != "ok session: not in an agent session" || got[2].String() != "ok orca: not installed" {
+	if got := cs[len(cs)-2:]; got[0].String() != "ok host: no terminal host with panes" || got[1].String() != "ok session: not in an agent session" {
 		t.Errorf("got %v", got)
 	}
 }

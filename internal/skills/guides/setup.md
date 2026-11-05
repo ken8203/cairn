@@ -35,12 +35,7 @@ What it does:
    `codex plugin add cairn@cairn`, each only when missing. Codex runs a plugin's hooks
    only once the user trusts them, so the user has to open Codex and approve cairn's
    two hooks.
-5. With herdr: writes cairn's herdr plugin to `${CAIRN_HOME:-~/.cairn}/herdr-plugin/`
-   and runs `herdr plugin link` on it when missing or rewritten. The `manual herdr-keys`
-   line is the keybinding the user adds to `~/.config/herdr/config.toml` to toggle the
-   panel; pass it on, since setup never edits that file.
-
-6. With Herdr.app: installs the compact native panel under its app home's
+5. With Herdr.app: installs the compact native panel under its app home's
    `mods/cairn/`, preserving edited assets as manual conflicts. Toggle with
    `cairn panel` or bind `mod.open:cairn`; both toggle the saved Floating/Dock mode.
    First open defaults to Dock, creating a personal layout copy with a resizable
