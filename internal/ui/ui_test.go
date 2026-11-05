@@ -3,6 +3,7 @@ package ui
 import (
 	json "encoding/json/v2"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -233,5 +234,41 @@ func TestShowFoundByFolder(t *testing.T) {
 	f.Via = "session"
 	if got := a.Show(f, 0); got[1] != "" {
 		t.Errorf("own trail says %q", got[1])
+	}
+}
+
+// When the panel's folder has no trail, as Rex's own folder for an init.lua action, the
+// folder of the program in the pane is asked.
+func TestFindPaneDir(t *testing.T) {
+	url := trail.URL("o/r#1")
+	a := newApp(t, map[string]github.PR{url: {Number: 1, State: "OPEN", Head: "feat/x"}})
+	repo := filepath.Join(t.TempDir(), "repo")
+	for _, args := range [][]string{
+		{"init", "-q", "-b", "feat/x", repo},
+		{"-C", repo, "remote", "add", "origin", "git@github.com:o/r.git"},
+		{"-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %q: %v\n%s", args, err, out)
+		}
+	}
+	writeTrail(t, a, "t", "# t\n\n- [ ] o/r#1\n")
+	a.Cache.Fetch([]string{url})
+
+	elsewhere := t.TempDir()
+	if f := a.findPane("p1", elsewhere); f.Trail != "" {
+		t.Errorf("without Dir: %+v", f)
+	}
+	var asked []string
+	a.Dir = func(pane string) string { asked = append(asked, pane); return repo }
+	if f := a.findPane("p1", elsewhere); f.Trail != "t" || f.Via != "dir" {
+		t.Errorf("from the pane's folder: %+v", f)
+	}
+	// A trail the panel's folder finds wins, without asking the pane.
+	asked = nil
+	if f := a.findPane("p1", repo); f.Trail != "t" || len(asked) != 0 {
+		t.Errorf("from the panel's folder: %+v, asked %q", f, asked)
 	}
 }

@@ -94,6 +94,7 @@ func newApp(home string) ui.App {
 		Sessions: session.Store{Dir: home, Trails: trails, Tab: host.Tab, Label: host.Label},
 		Cache:    github.Cache{Dir: filepath.Join(home, "cache"), TTL: ttl, Query: github.Query},
 		Title:    host.Title,
+		Dir:      host.Dir,
 		Spawn:    spawn,
 	}
 }
@@ -284,7 +285,8 @@ func run(app ui.App, args []string) error {
 		wd, _ := os.Getwd()
 		closeOnly := slices.Contains(args[1:], "--close")
 		if slices.Contains(args[1:], "--lua") {
-			lua, err := host.RexPanelLua(self, target, wd, closeOnly)
+			// An init.lua action runs this in Rex's own folder, which names no trail.
+			lua, err := host.RexPanelLua(self, target, "", closeOnly)
 			if err != nil {
 				return err
 			}

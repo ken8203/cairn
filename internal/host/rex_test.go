@@ -3,6 +3,7 @@ package host
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -88,5 +89,25 @@ func TestRexPanelLua(t *testing.T) {
 	clearEnv(t)
 	if _, err := RexPanelLua(cairn, "", "", false); err == nil {
 		t.Error("RexPanelLua outside Rex succeeded")
+	}
+}
+
+func TestRexDir(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("REX_SESSION", "session:s1")
+	_, log := fakeCLIs(t, map[string]string{"rex": `case "$*" in
+*block:b1*) echo '{"child":{"pid":1},"foreground":{"pid":9,"cwd":"/w/api"}}' ;;
+*) echo 'Error: block target not found' >&2; exit 1 ;;
+esac`})
+	for block, want := range map[string]string{"b1": "/w/api", "gone": ""} {
+		if got := Dir(block); got != want {
+			t.Errorf("Dir(%q) = %q, want %q", block, got, want)
+		}
+	}
+	if !slices.Contains(log(), "rex block call -s session:s1 -b block:b1 process {}") {
+		t.Errorf("ran %q", log())
+	}
+	if Dir("tmux-4242.3") != "" {
+		t.Error("tmux pane has a folder")
 	}
 }

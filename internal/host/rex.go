@@ -18,6 +18,7 @@ var rex = host{
 	tab:   func() string { return rexWindow(Key(os.Getenv("REX_BLOCK"))) },
 	label: func() string { return rexLabel(os.Getenv("REX_SESSION")) },
 	title: rexTitle,
+	dir:   func(block string) string { return rexProcessOf(block).Foreground.Cwd },
 	panel: rexPanel,
 }
 
@@ -38,6 +39,20 @@ func rexTitle(block string) string {
 	}
 	decode(&res, rexBin(), "block", "call", "-s", os.Getenv("REX_SESSION"), "-b", "block:"+block, "title", "{}")
 	return res.Title
+}
+
+// rexProcess is what Rex knows of the program in the foreground of a block.
+type rexProcess struct {
+	Foreground struct {
+		PID int    `json:"pid"`
+		Cwd string `json:"cwd"`
+	} `json:"foreground"`
+}
+
+func rexProcessOf(block string) rexProcess {
+	var p rexProcess
+	decode(&p, rexBin(), "block", "call", "-s", os.Getenv("REX_SESSION"), "-b", "block:"+block, "process", "{}")
+	return p
 }
 
 // rexDefaultSuffix is how much of a window's id Rex puts in the label it gives a window

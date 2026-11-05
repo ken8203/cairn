@@ -32,6 +32,8 @@ type host struct {
 	label func() string
 	// title is the title of the pane a key body names.
 	title func(body string) string
+	// dir is the folder of the program in the foreground of the pane a key body names.
+	dir func(body string) string
 	// panel toggles the panel running w beside the pane a key body names, or with close
 	// only closes it.
 	panel func(body string, w watch, close bool) error
@@ -141,6 +143,16 @@ func Title(key string) string { return title(hosts, key) }
 func title(hs []host, key string) string {
 	h, body := lookup(hs, key)
 	return h.title(body)
+}
+
+// Dir is the folder of the program in the foreground of the pane a key names, or empty
+// when its host doesn't know it.
+func Dir(key string) string {
+	h, body := lookup(hosts, key)
+	if h.dir == nil {
+		return ""
+	}
+	return h.dir(body)
 }
 
 // lookup is the host a stored key belongs to, by its prefix, and the key's body; a key
