@@ -35,7 +35,7 @@ func TestAgentAndPane(t *testing.T) {
 		{"x1", "c1", "block:b1", "x1", "b1"},
 		{"../x", "c1", "block:../b", "c1", ""},
 	}
-	for _, k := range []string{"TMUX_PANE", "HERDR_PANE_ID", "HC_TERMINAL_ID", "ORCA_TERMINAL_HANDLE"} {
+	for _, k := range []string{"HC_TERMINAL_ID"} {
 		t.Setenv(k, "")
 	}
 	for _, tt := range tests {

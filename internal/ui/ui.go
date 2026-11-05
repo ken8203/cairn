@@ -569,21 +569,6 @@ func (a App) summary(name string) string {
 	return s
 }
 
-// Progress is a trail's finished and total steps and its next step, as a short ref or
-// its text, empty when all are done; from the cache alone.
-func (a App) Progress(name string) (finished, total int, next string) {
-	steps, _ := a.loadSteps(name)
-	finished, total, n := progress(a.withStates(steps))
-	switch {
-	case n == nil:
-	case n.PR:
-		next = shortRef(trail.Ref(n.Value))
-	default:
-		next = trail.Clean(n.Value)
-	}
-	return finished, total, next
-}
-
 // refreshInBackground starts a refresh unless one for the session is running.
 func (a App) refreshInBackground(key string, urls []string) {
 	if !a.Cache.TryLock(key) {

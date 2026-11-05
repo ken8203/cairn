@@ -37,6 +37,6 @@ Go 1.27, with `encoding/json/v2` imported as `json`. When writing Go, follow the
   work or a terminal host, and before writing tests (how they isolate state, `gh` and
   host CLIs).
 - [docs/reference.md](docs/reference.md) — before changing what a command, the hook,
-  the panel, setup/doctor, the Orca sync or the `--json` output does; it is the spec.
+  the panel, setup/doctor or the `--json` output does; it is the spec.
 - [README.md](README.md) — the user's view: installing, everyday commands, binding the
   panel.

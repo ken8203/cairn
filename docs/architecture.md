@@ -12,8 +12,7 @@ internal/github      PR state: one batched GraphQL request, the 60-second cache,
 internal/session     agent and pane ids, session files, pane pointers, auto-created trails, folder lookup
 internal/hook        agent hook payloads, and what a Bash command touched to record
 internal/host        the terminal cairn runs in: pane keys, labels, pane titles, the panel
-internal/orca        Orca worktree cards kept in sync with their trails
-internal/setup       agent plugin CLIs, herdr's plugin, embedded Herdr.app mod, doctor's checks
+internal/setup       agent plugin CLIs, embedded Herdr.app mod, doctor's checks
 internal/skills      the guides `cairn skills` prints, embedded
 internal/ui          show, ls, the statusline and the panel
 ```
@@ -25,7 +24,7 @@ skill.
 ## Package dependencies
 
 `cmd` wires the rest together (`newApp`) and hands the host's label and title lookups and
-the GitHub query in as functions. `trail`, `github`, `host`, `orca`, `hook`, `setup` and
+the GitHub query in as functions. `trail`, `github`, `host`, `hook`, `setup` and
 `skills` import no other cairn package; `session` uses `trail` and `host`; `ui` uses
 `trail`, `github` and `session`. A package that needs another's behavior takes it as a
 function from `cmd`.
@@ -42,10 +41,9 @@ command with `mvdan.cc/sh` (`internal/hook`) and hands the GitHub lookup to a de
 ## Background work
 
 Work that shouldn't hold up a command runs detached through `spawn` in
-`cmd/cairn/main.go`: `cairn record` from the hook, `__refresh` for stale PRs and `__orca`
-for the Orca sync. `spawn` runs the `cairn` beside the running binary, not the one on
-`PATH`. A lock in the cache dir (`TryLock`) keeps one refresh per session, and one Orca
-sync, running at a time.
+`cmd/cairn/main.go`: `cairn record` from the hook and `__refresh` for stale PRs. `spawn`
+runs the `cairn` beside the running binary, not the one on `PATH`. A lock in the cache
+dir (`TryLock`) keeps one refresh per session running at a time.
 
 State is shared by every cairn process (hooks, panels, agents), so every write to a
 trail or session file takes a lock and replaces the file atomically (`trail.Lock`,
@@ -54,9 +52,9 @@ trail or session file takes a lock and replaces the file atomically (`trail.Lock
 ## Hosts
 
 `internal/host` has one file per terminal, each a `host` value: `rex.go` (with
-`rex.lua`, embedded), `herdr.go`, `hc.go`, `tmux.go` and `orca.go`; `host.go`
-dispatches. The `hosts` slice is in detection order, innermost first, and a stored pane
-key finds its host by prefix. Rex's keys have no prefix, so Rex stays last as the
+`rex.lua`, embedded) and `hc.go` (Herdr.app, with `herdr_app.go` for its native mod);
+`host.go` dispatches. The `hosts` slice is in detection order, and a stored pane key
+finds its host by prefix. Rex's keys have no prefix, so Rex stays last as the
 fallback. Every host CLI call, a panel's or a lookup's (pane keys, labels, titles), goes
 through `cli`, with its 10-second timeout: the hook and the statusline must not hang on
 a host that stopped answering.
@@ -73,10 +71,9 @@ agent at `cairn skills get`.
 Tests never touch real terminals, `gh` or `~/.cairn`:
 
 - `testApp` in `cmd/cairn/main_test.go` gives an app on a temp home, with the host env
-  vars (`REX_BLOCK`, `TMUX_PANE`, `HERDR_PANE_ID`, `HC_TERMINAL_ID`,
-  `ORCA_TERMINAL_HANDLE`, `CODEX_THREAD_ID`, `CLAUDE_CODE_SESSION_ID`) cleared and a GitHub that knows only the
-  PRs it's given.
+  vars (`REX_BLOCK`, `HC_TERMINAL_ID`, `CODEX_THREAD_ID`, `CLAUDE_CODE_SESSION_ID`)
+  cleared and a GitHub that knows only the PRs it's given.
 - Tests that run the binary build it once (`build` in `cmd/cairn/hook_test.go`). `hookEnv`
   puts it beside a stub `cairn` that logs what it was asked to record, which is what
   `spawn` runs.
-- Host CLIs (`orca`, `herdr`, `rex`, …) are faked as scripts on a temp `PATH`.
+- Host CLIs (`rex`, `hc`, `herdr-app`) are faked as scripts on a temp `PATH`.

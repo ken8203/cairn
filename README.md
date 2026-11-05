@@ -34,9 +34,8 @@ From a checkout, `make install` builds `~/.local/bin/cairn` instead
 (`make install PREFIX=/usr/local` for `/usr/local/bin`). Or just ask your agent to "set
 up cairn": `cairn skills get setup` tells it how.
 
-`cairn setup` also installs a native Herdr.app panel when `herdr-app` is on `PATH`.
-It installs cairn's plugin into Claude Code and Codex, and into herdr when
-it's on `PATH`, then runs `cairn doctor` to check the install. Codex runs a plugin's hooks
+`cairn setup` installs cairn's plugin into Claude Code and Codex, and a native Herdr.app
+panel when `herdr-app` is on `PATH`, then runs `cairn doctor` to check the install. Codex runs a plugin's hooks
 only once you trust them: open Codex, run `/hooks`, and trust cairn's two.
 `cairn setup --dry-run` shows what it would run.
 
@@ -86,7 +85,7 @@ Keep the trail in sight while you work: `cairn panel` opens the pane's trail bes
 in whatever way your terminal does best. Agents run it when you ask to see the trail;
 bind it to a key to toggle it yourself.
 
-**Works in** Rex · tmux · herdr · Herdr.app · Orca, and in any other terminal through
+**Works in** Rex · Herdr.app, and in any other terminal through
 `cairn watch` in a split.
 
 <details>
@@ -101,33 +100,6 @@ rex.action{ name = "cairn", title = "Toggle cairn", run = function(ctx)
   loadstring(res.stdout)()
 end }
 rex.bind("ctrl+cmd+p", "cairn")
-```
-
-</details>
-
-<details>
-<summary><b>tmux</b>: a popup over the pane</summary>
-
-Bind a key in `~/.tmux.conf`; <kbd>q</kbd> closes the popup:
-
-```tmux
-bind-key T run-shell 'cairn panel'
-```
-
-</details>
-
-<details>
-<summary><b>herdr</b>: an overlay over the pane, from cairn's herdr plugin</summary>
-
-Once `cairn setup` has linked the plugin, bind its `cairn.panel` action in
-`~/.config/herdr/config.toml`:
-
-```toml
-[[keys.command]]
-key = "prefix+t"
-type = "plugin_action"
-command = "cairn.panel"
-description = "toggle cairn"
 ```
 
 </details>
@@ -166,14 +138,6 @@ panel. [Details and remote requirements](docs/reference.md#herdrapp-panel).
 </details>
 
 <details>
-<summary><b>Orca</b>: a terminal split off the pane, plus worktree cards in sync</summary>
-
-Add an Orca command that runs `cairn panel`. cairn also keeps each worktree's card in sync
-with its trail: its PR, the trail's other PRs as references, and a progress note.
-
-</details>
-
-<details>
 <summary><b>Ghostty and the rest</b>: any terminal without a pane API</summary>
 
 Run `cairn watch` in a split yourself.
@@ -204,6 +168,6 @@ whatever `statusLine.command` `~/.claude/settings.json` already has:
 
 - [Reference](docs/reference.md): how cairn behaves in full — setup and doctor,
   sessions and panes, `~/.cairn`, finding a trail by folder, what the hook records, the
-  panel on each host, Orca sync, and the `cairn show --json` format.
+  panel on each host, and the `cairn show --json` format.
 - [Architecture](docs/architecture.md): how the code is laid out, for working on cairn.
   Build with `make build`, test with `make test`.

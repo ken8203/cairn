@@ -83,8 +83,8 @@ func TestRexPanelLua(t *testing.T) {
 	if got2, _ := RexPanelLua(cairn, "b1", "", false); got2 != got {
 		t.Errorf("RexPanelLua for the named block = %q, want %q", got2, got)
 	}
-	if _, err := RexPanelLua(cairn, "tmux-1.2", "", false); err == nil {
-		t.Error("RexPanelLua for a tmux pane succeeded")
+	if _, err := RexPanelLua(cairn, "hc-t3."+hcScope, "", false); err == nil {
+		t.Error("RexPanelLua for a Herdr.app terminal succeeded")
 	}
 	clearEnv(t)
 	if _, err := RexPanelLua(cairn, "", "", false); err == nil {
@@ -107,8 +107,8 @@ esac`})
 	if !slices.Contains(log(), "rex block call -s session:s1 -b block:b1 process {}") {
 		t.Errorf("ran %q", log())
 	}
-	if Dir("tmux-4242.3") != "" {
-		t.Error("tmux pane has a folder")
+	if Dir("hc-t3."+hcScope) != "" {
+		t.Error("Herdr.app terminal has a folder")
 	}
 }
 
@@ -131,7 +131,7 @@ esac`})
 		t.Errorf("ran %q", log())
 	}
 	// Hosts that can't tell trust their env.
-	if !Holds("tmux-4242.3") {
-		t.Error("tmux pane not trusted")
+	if !Holds("hc-t3." + hcScope) {
+		t.Error("Herdr.app terminal not trusted")
 	}
 }

@@ -64,7 +64,6 @@ func TestSetupInstallsOnceAndIsIdempotent(t *testing.T) {
 		"skip codex-marketplace: dry run; would run `codex plugin marketplace add ken8203/cairn`",
 		"skip codex-plugin: dry run; would run `codex plugin add cairn@cairn`",
 		"manual codex-hooks: " + codexTrustFix,
-		"skip herdr: herdr is not on PATH",
 	}; !slices.Equal(got, want) {
 		t.Errorf("dry run:\n%s", strings.Join(got, "\n"))
 	}
@@ -86,7 +85,6 @@ func TestSetupInstallsOnceAndIsIdempotent(t *testing.T) {
 		"done codex-plugin: ran `codex plugin add cairn@cairn`",
 		"manual codex-restart: restart running Codex sessions to load cairn's hooks",
 		"manual codex-hooks: " + codexTrustFix,
-		"skip herdr: herdr is not on PATH",
 	}; !slices.Equal(got, want) {
 		t.Errorf("first run:\n%s", strings.Join(got, "\n"))
 	}
@@ -113,7 +111,6 @@ func TestSetupInstallsOnceAndIsIdempotent(t *testing.T) {
 		"ok codex-marketplace: cairn is added",
 		"ok codex-plugin: cairn@cairn installed and enabled",
 		"ok codex-hooks: cairn's hooks are trusted",
-		"skip herdr: herdr is not on PATH",
 	}; !slices.Equal(got, want) {
 		t.Errorf("second run:\n%s", strings.Join(got, "\n"))
 	}
@@ -157,12 +154,11 @@ func TestSetupWithoutAgentsOrGh(t *testing.T) {
 		"manual gh: gh is not on PATH; cairn reads PRs through it; install the GitHub CLI: https://cli.github.com",
 		"skip claude: claude is not on PATH",
 		"skip codex: codex is not on PATH",
-		"skip herdr: herdr is not on PATH",
 	}
 	if !slices.Equal(got[1:], want) {
 		t.Errorf("setup:\n%s", strings.Join(got, "\n"))
 	}
-	if len(cs) != 5 || !Failed(cs) {
+	if len(cs) != 4 || !Failed(cs) {
 		t.Errorf("checks: %v", cs)
 	}
 }

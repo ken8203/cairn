@@ -10,7 +10,6 @@ use; this picks up where it stops.
 - [Folders](#folders)
 - [Recording](#recording)
 - [Panel](#panel)
-- [Orca workspaces](#orca-workspaces)
 - [JSON](#json)
 - [Statusline](#statusline)
 
@@ -25,8 +24,7 @@ claude plugin marketplace add ken8203/cairn && claude plugin install cairn@cairn
 codex plugin marketplace add ken8203/cairn && codex plugin add cairn@cairn
 ```
 
-With herdr on `PATH`, setup also writes cairn's herdr plugin and links it (see
-[Panel](#panel)). Setup prints one `ok|done|skip|manual <step>: <detail>` line per step,
+Setup prints one `ok|done|skip|manual <step>: <detail>` line per step,
 runs only what's missing, leaves user settings and layouts alone, and ends with `cairn doctor`.
 `cairn setup --dry-run` shows what it would run. Agents load a plugin's hooks only when a
 session starts, so after installing or enabling the plugin in an agent setup prints
@@ -35,13 +33,10 @@ session starts, so after installing or enabling the plugin in an agent setup pri
 `cairn doctor` prints `ok|warn|fail <check>: <detail>` lines, or with `--json` an array of
 `{check,status,detail,fix}`: whether `cairn` on `PATH` is this binary, `gh` is logged in,
 `cairn@cairn` is installed and enabled in Claude Code and Codex, and both its hooks are
-trusted in `$CODEX_HOME/config.toml`, and, with herdr installed, cairn's herdr plugin
-linked to this binary (a `warn` otherwise), then the terminal host, pane and agent
-session. Untrusted or disabled Codex hooks are a `warn`, since setup can't trust them for
+trusted in `$CODEX_HOME/config.toml`, then the terminal host, pane and agent session. Untrusted or disabled Codex hooks are a `warn`, since setup can't trust them for
 you. In an agent session that never ran cairn's `SessionStart` hook (no `hooked/<session>`
 marker, see [State](#state)), as one started before the plugin was installed, the
-`session` check is a `warn` whose fix is to restart that session. Last, an `orca` line
-counts the Orca worktrees on trails, or says Orca isn't installed.
+`session` check is a `warn` whose fix is to restart that session.
 
 With `herdr-app` on `PATH`, setup also installs the [native panel](#herdrapp-panel).
 Doctor adds a read-only `herdr-mod` check for missing, stale or edited assets; current
@@ -72,22 +67,14 @@ A session is keyed by `$CODEX_THREAD_ID`, else `$CLAUDE_CODE_SESSION_ID`, else t
 it runs in (a human in a plain pane). Codex comes first because a Codex launched from
 Claude Code inherits Claude's session id.
 
-cairn knows the panes of these terminals, checked innermost first, since herdr usually
-runs inside another terminal or tmux, tmux inside a terminal app, and either may run in
-Herdr.app. When they nest, only the innermost pane is recorded, so its panel is the one
-that follows the session:
+cairn knows the panes of these terminals, checked in this order:
 
 | Host | Pane key | Tab | Label |
 | --- | --- | --- | --- |
-| herdr | `herdr-<session>.<id>.<terminal>` from `$HERDR_SESSION` (else `default`), `$HERDR_PANE_ID` and the pane's terminal id in `herdr pane get` | the label of the pane's tab in `herdr tab get`, unless still the number herdr gave it | the workspace's label |
-| tmux | `tmux-<pid>.<n>` from the server pid in `$TMUX` and `$TMUX_PANE` (`%3` is `tmux-<pid>.3`) | the window's name once renamed, which turns off its `automatic-rename` | the tmux session's name |
 | Herdr.app | `hc-<address>.<core-id>` from `$HC_TERMINAL_ID` and `hc server status --json`'s `core.id`, titles and labels from the `hc` CLI | the app tab in the same `where` label, unless still its number | the app space in `hc get`'s `where` label |
-| Orca | `orca-<handle>` from `$ORCA_TERMINAL_HANDLE` | the worktree's directory name | the same |
 | Rex | `$REX_BLOCK` without its `block:` prefix | the label of the window holding the block, unless still Rex's `Window <last 8 of its id>` | the Rex session's label |
 
-Titles come from each host's CLI and are blank when it can't answer, as for a herdr
-session whose name has characters other than letters, digits, `.`, `_` and `-`, or a
-tmux server started with `-L`.
+Titles come from each host's CLI and are blank when it can't answer.
 
 In Ghostty or any other terminal there is no pane: an agent session works as anywhere
 else, but a human has no session of their own.
@@ -98,16 +85,16 @@ Older `hc-<address>.<scope>` keys remain readable when passed explicitly. After 
 upgrade, sessions re-register under the new key on their next cairn command or hook;
 there is no prefix or timestamp migration. The private `HC_SCOPE` is not read.
 
-Other hosts' pane keys name one pane process: a restored or reused pane starts fresh.
-Run `cairn use <name>` there to rejoin a trail.
+A Rex key names one block: a restored or reused pane starts fresh. Run
+`cairn use <name>` there to rejoin a trail.
 
 A pane id comes from the environment, which a program can carry out of its pane: a Codex
 app-server started in one Rex block keeps that `$REX_BLOCK` for the threads it runs from
 any tab, even once the block is gone. So before an agent session points a Rex block at
 itself (see [State](#state)), cairn asks `rex block call <block> process` for the
 block's foreground program and points it only when that is cairn or its ancestor. Such a
-session still keeps its own trail; its tab's panel finds it by folder. Other hosts' panes
-are trusted.
+session still keeps its own trail; its tab's panel finds it by folder. Herdr.app
+terminals are trusted.
 
 A session that touches a PR already on another trail does not join it. When a session
 without a trail opens or pushes its own PR, cairn starts a trail for it, named after the
@@ -126,7 +113,6 @@ All of cairn's state lives in `${CAIRN_HOME:-~/.cairn}`:
   panes/<pane-key>                     the last agent session that ran cairn in a pane
   hooked/<session>                     empty: this agent session ran cairn's SessionStart hook
   cache/prs/<owner>/<repo>/<n>.json    PR state from GitHub
-  herdr-plugin/herdr-plugin.toml       cairn's herdr plugin, written by setup
 ```
 
 A session's file is
@@ -209,8 +195,7 @@ switches to a new session once it has run cairn there; `<pane>` is a pane key (s
 the pane's session has no trail, it shows the trail of `--dir`, else of the folder it
 runs in, else, in Rex, of the folder of the block's foreground program, asked again on
 each refresh. `cairn panel --lua` hands no `--dir`, since an init.lua action runs it in
-Rex's own folder. `cairn watch --from-env` takes the pane and folder from `$CAIRN_PANE`
-and `$CAIRN_DIR`, for herdr's overlay.
+Rex's own folder.
 
 `cairn panel [pane]` toggles that view for a pane, the current one without a key, in the
 way its host suits best; `cairn panel --close` only closes it. Agents run it when you ask
@@ -220,24 +205,11 @@ README's [Panel](../README.md#panel) section shows how to bind it.
 | Host | Panel |
 | --- | --- |
 | Rex | a floating layer over the window, labelled `cairn` (`rex do - -b <block>` with a Lua script cairn carries) |
-| tmux | a popup, 80% by 50%, over the pane |
-| herdr | an overlay pane over the pane, labelled `cairn`, from cairn's herdr plugin; without the plugin, a pane split off to the right, 35% wide, named `cairn` in the same tab |
 | Herdr.app | a native `cairn` mod in saved Floating/Dock mode; otherwise a terminal named `cairn-<address>` from `hc run` |
-| Orca | a terminal split off the pane, titled `cairn` |
 
 Rex starts an action's programs without the terminal's environment, where `rex` itself
 can't be found, so its action toggles the layer in the Lua `cairn panel --lua [block]`
 prints rather than through `cairn panel`.
-
-For herdr, `cairn setup` writes a plugin, `herdr-plugin.toml` in
-`${CAIRN_HOME:-~/.cairn}/herdr-plugin/`, whose commands use the absolute path of the cairn
-that wrote it: a `panel` action, "Toggle cairn", runs `cairn panel`, and a `panel` pane,
-an overlay titled `cairn`, runs `cairn watch --from-env`. Setup rewrites the file when it
-differs, as after cairn moved, and runs `herdr plugin link <dir>` when herdr doesn't have
-it from there or it was rewritten. Linked plugins are global to the user, across herdr
-sessions. `cairn panel` then opens the overlay with `herdr plugin pane open --plugin cairn
---entrypoint panel --placement overlay --env CAIRN_PANE=<key> --env CAIRN_DIR=<dir>`; run
-as the action, it takes the focused pane's folder from `$HERDR_PLUGIN_CONTEXT_JSON`.
 
 In a terminal without a pane API, `cairn panel` says so and exits 0. Each host CLI call
 times out after 10 seconds, and a failure is one line on stderr with exit 1.
@@ -345,33 +317,7 @@ GitHub HTTPS URLs. The native panel is read-only; use the CLI to edit trails.
 For remote terminals, the mod runs `cairn` through Herdr's `exec` on that machine,
 using its local terminal address and core ID. Install current cairn, `hc` and authenticated
 `gh` there; the remote `cairn` must be on `PATH`. It reads that machine's cairn state,
-never the local machine's. Missing cwd means no folder fallback. When tmux or herdr TUI
-runs inside Herdr.app, cairn records only the inner pane; the native panel can then
-find a trail only through the terminal's folder, unless that outer terminal has its
-own mapping. It does not write inner/outer pane links.
-
-## Orca workspaces
-
-cairn keeps the card of each Orca worktree whose folder is on a trail (see
-[Folders](#folders)) in sync with it, through the `orca` CLI, whichever terminal changed
-the trail:
-
-- the trail's PR in the worktree's repo whose head is its branch becomes the card's PR,
-  under reviews (`orca worktree set --worktree path:<dir> --pr <n> --json`);
-- the trail's other PRs, in any repo, are added as references when the card lacks them
-  (`orca reference add <url>... --worktree path:<dir> --json`);
-- the note becomes `cairn · checkout-v2 2/4 ▶ api#121`, or `cairn · checkout-v2 ✓ all
-  done` (`orca worktree set --worktree path:<dir> --comment <text> --json`).
-
-cairn writes a note only when it is empty or starts with `cairn · `: a note you wrote
-stays as it is. It never removes a PR or reference that left the trail, and calls
-`worktree set` only when something changed.
-
-The sync runs detached after `use`, `add`, `link`, `done`, `note`, a recorded PR and a
-background refresh of PR states, one at a time, so a burst of commands runs it once or
-twice. It looks for `orca` on `PATH`, then in `/Applications/Orca.app` and
-`~/Applications/Orca.app`, skips everything when `orca status` says the runtime isn't
-reachable, gives each call five seconds, and drops its errors.
+never the local machine's. Missing cwd means no folder fallback.
 
 ## JSON
 
