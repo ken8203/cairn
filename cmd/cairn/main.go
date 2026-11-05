@@ -91,7 +91,7 @@ func orcaDetail(app ui.App) string {
 func newApp(home string) ui.App {
 	trails := trail.Store{Dir: filepath.Join(home, "trails")}
 	return ui.App{
-		Sessions: session.Store{Dir: home, Trails: trails, Tab: host.Tab, Label: host.Label},
+		Sessions: session.Store{Dir: home, Trails: trails, Tab: host.Tab, Label: host.Label, Holds: host.Holds},
 		Cache:    github.Cache{Dir: filepath.Join(home, "cache"), TTL: ttl, Query: github.Query},
 		Title:    host.Title,
 		Dir:      host.Dir,
@@ -322,8 +322,12 @@ func run(app ui.App, args []string) error {
 		if cmp.Or(as, pane()) == "" {
 			return nil
 		}
-		if err := enter(as); err != nil {
-			return err
+		// The hook's record runs detached, out of the pane's process tree, so it can't
+		// tell whether the pane holds the agent; SessionStart already pointed it.
+		if o.session == "" {
+			if err := enter(as); err != nil {
+				return err
+			}
 		}
 		return record(app, cmp.Or(as, pane()), o)
 	case "__refresh":

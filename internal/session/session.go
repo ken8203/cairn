@@ -44,6 +44,9 @@ type Store struct {
 	// Tab is the name the user gave the current pane's tab, and Label the host's label for
 	// the wider place it is in; they name a trail a session starts.
 	Tab, Label func() string
+	// Holds reports whether a pane runs cairn, as one named by an environment inherited
+	// from elsewhere may not; nil trusts it.
+	Holds func(pane string) bool
 }
 
 // state is a session's file: the trail it is on, the PRs it touched and the places it
@@ -185,14 +188,22 @@ const (
 // NotePane points the pane at the agent's session. Only an agent does: the statusline may
 // run without the agent's session id, and would point the pane back at itself. A
 // pointer already right is only touched, at most every touchAge, so it doesn't expire.
+// A pane that doesn't hold cairn gets no pointer, and keeps its own.
 func (s Store) NotePane(agent, pane string) error {
 	if agent == "" || pane == "" {
 		return nil
 	}
 	file := s.pointerFile(pane)
-	if readName(file) == agent {
-		touch(file)
+	same := readName(file) == agent
+	if same && !aged(file) {
 		return nil
+	}
+	if s.Holds != nil && !s.Holds(pane) {
+		return nil
+	}
+	if same {
+		now := time.Now()
+		return os.Chtimes(file, now, now)
 	}
 	if err := os.MkdirAll(s.panesDir(), 0o755); err != nil {
 		return err
@@ -204,9 +215,15 @@ func (s Store) NotePane(agent, pane string) error {
 	return nil
 }
 
+// aged reports whether a file is touchAge old.
+func aged(file string) bool {
+	fi, err := os.Stat(file)
+	return err == nil && time.Since(fi.ModTime()) > touchAge
+}
+
 // touch bumps a file's time once it is touchAge old.
 func touch(file string) {
-	if fi, err := os.Stat(file); err == nil && time.Since(fi.ModTime()) > touchAge {
+	if aged(file) {
 		now := time.Now()
 		os.Chtimes(file, now, now)
 	}

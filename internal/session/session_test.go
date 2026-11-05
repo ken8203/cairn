@@ -388,3 +388,30 @@ func TestFind(t *testing.T) {
 		}
 	}
 }
+
+// A pane that doesn't hold cairn, as one an inherited env names, keeps its pointer.
+func TestNotePaneHolds(t *testing.T) {
+	s := newStore(t)
+	s.NotePane("s1", "p1")
+	var asked []string
+	s.Holds = func(pane string) bool { asked = append(asked, pane); return false }
+	s.NotePane("s2", "p1")
+	s.NotePane("s2", "p2")
+	if got := readName(s.pointerFile("p1")); got != "s1" {
+		t.Errorf("p1 points at %q", got)
+	}
+	if _, err := os.Stat(s.pointerFile("p2")); err == nil {
+		t.Error("p2 got a pointer")
+	}
+	// A pointer already right is asked about only when it is due a touch.
+	s.NotePane("s1", "p1")
+	old := time.Now().Add(-touchAge - time.Hour)
+	os.Chtimes(s.pointerFile("p1"), old, old)
+	s.NotePane("s1", "p1")
+	if fi, _ := os.Stat(s.pointerFile("p1")); !fi.ModTime().Equal(old) {
+		t.Error("touched a pointer its pane doesn't hold")
+	}
+	if want := []string{"p1", "p2", "p1"}; !slices.Equal(asked, want) {
+		t.Errorf("asked %q, want %q", asked, want)
+	}
+}

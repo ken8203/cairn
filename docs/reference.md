@@ -101,6 +101,14 @@ there is no prefix or timestamp migration. The private `HC_SCOPE` is not read.
 Other hosts' pane keys name one pane process: a restored or reused pane starts fresh.
 Run `cairn use <name>` there to rejoin a trail.
 
+A pane id comes from the environment, which a program can carry out of its pane: a Codex
+app-server started in one Rex block keeps that `$REX_BLOCK` for the threads it runs from
+any tab, even once the block is gone. So before an agent session points a Rex block at
+itself (see [State](#state)), cairn asks `rex block call <block> process` for the
+block's foreground program and points it only when that is cairn or its ancestor. Such a
+session still keeps its own trail; its tab's panel finds it by folder. Other hosts' panes
+are trusted.
+
 A session that touches a PR already on another trail does not join it. When a session
 without a trail opens or pushes its own PR, cairn starts a trail for it, named after the
 pane's tab when you named it, else the PR's branch, else the host's label (both above),
@@ -182,7 +190,9 @@ PRs the agent authors (create, push) join the session's trail ahead of its first
 unfinished free-text step and behind the PRs already there, so they keep the order they
 were opened in; a trail is started if the session has none. The hook keys the session by
 the id the agent hands it, and asks GitHub from a detached `cairn record`, so it returns
-at once and never fails the agent's command.
+at once and never fails the agent's command. That `cairn record` has left the pane's
+process tree, so it leaves the pane's pointer alone; `SessionStart` and the agent's own
+cairn commands point the pane.
 
 Each record also stores the place it was recorded from (see [State](#state)): the dir a
 push, a `gh pr` command or `gh pr create` ran in.
