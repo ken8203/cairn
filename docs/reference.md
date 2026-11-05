@@ -101,6 +101,14 @@ there is no prefix or timestamp migration. The private `HC_SCOPE` is not read.
 Other hosts' pane keys name one pane process: a restored or reused pane starts fresh.
 Run `cairn use <name>` there to rejoin a trail.
 
+A pane id comes from the environment, which a program can carry out of its pane: a Codex
+app-server started in one Rex block keeps that `$REX_BLOCK` for the threads it runs from
+any tab, even once the block is gone. So before an agent session points a Rex block at
+itself (see [State](#state)), cairn asks `rex block call <block> process` for the
+block's foreground program and points it only when that is cairn or its ancestor. Such a
+session still keeps its own trail; its tab's panel finds it by folder. Other hosts' panes
+are trusted.
+
 A session that touches a PR already on another trail does not join it. When a session
 without a trail opens or pushes its own PR, cairn starts a trail for it, named after the
 pane's tab when you named it, else the PR's branch, else the host's label (both above),
@@ -154,8 +162,9 @@ detached HEAD, a folder has none. Each git call gets two seconds.
 
 Views show, in order, the session's own trail, that of the session the pane last ran,
 then the folder's: `cairn` and `cairn show` (the cwd, or `--dir <path>`), the
-statusline (its cwd), `cairn watch` (`--dir`, else its cwd) and `cairn panel`, which
-hands the caller's cwd to the watch it starts. A trail found by folder says so,
+statusline (its cwd), `cairn watch` (`--dir`, else its cwd, else in Rex the block's; see
+[Panel](#panel)) and `cairn panel`, which hands the caller's cwd to the watch it
+starts. A trail found by folder says so,
 `found by folder: api on checkout-v2 — cairn use checkout-v2 to join`, and `cairn` shows
 it even outside any session or pane. The folder never binds a session: `add`, `done`,
 `note` and `link` still need the session's own trail, and their error names the
@@ -181,7 +190,9 @@ PRs the agent authors (create, push) join the session's trail ahead of its first
 unfinished free-text step and behind the PRs already there, so they keep the order they
 were opened in; a trail is started if the session has none. The hook keys the session by
 the id the agent hands it, and asks GitHub from a detached `cairn record`, so it returns
-at once and never fails the agent's command.
+at once and never fails the agent's command. That `cairn record` has left the pane's
+process tree, so it leaves the pane's pointer alone; `SessionStart` and the agent's own
+cairn commands point the pane.
 
 Each record also stores the place it was recorded from (see [State](#state)): the dir a
 push, a `gh pr` command or `gh pr create` ran in.
@@ -196,8 +207,10 @@ hears of that trail instead. Agents without hooks get no automatic recording.
 switches to a new session once it has run cairn there; `<pane>` is a pane key (see
 [Sessions](#sessions)), or a Rex block. Without one it watches the pane it runs in. When
 the pane's session has no trail, it shows the trail of `--dir`, else of the folder it
-runs in. `cairn watch --from-env` takes the pane and folder from `$CAIRN_PANE` and
-`$CAIRN_DIR`, for herdr's overlay.
+runs in, else, in Rex, of the folder of the block's foreground program, asked again on
+each refresh. `cairn panel --lua` hands no `--dir`, since an init.lua action runs it in
+Rex's own folder. `cairn watch --from-env` takes the pane and folder from `$CAIRN_PANE`
+and `$CAIRN_DIR`, for herdr's overlay.
 
 `cairn panel [pane]` toggles that view for a pane, the current one without a key, in the
 way its host suits best; `cairn panel --close` only closes it. Agents run it when you ask

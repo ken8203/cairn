@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -32,6 +33,10 @@ type host struct {
 	label func() string
 	// title is the title of the pane a key body names.
 	title func(body string) string
+	// holds reports whether the pane a key body names runs cairn; nil trusts the env.
+	holds func(body string) bool
+	// dir is the folder of the program in the foreground of the pane a key body names.
+	dir func(body string) string
 	// panel toggles the panel running w beside the pane a key body names, or with close
 	// only closes it.
 	panel func(body string, w watch, close bool) error
@@ -141,6 +146,43 @@ func Title(key string) string { return title(hosts, key) }
 func title(hs []host, key string) string {
 	h, body := lookup(hs, key)
 	return h.title(body)
+}
+
+// Holds reports whether the pane a key names runs cairn, as one inherited from an
+// environment set elsewhere may not. Hosts that can't tell trust it.
+func Holds(key string) bool {
+	h, body := lookup(hosts, key)
+	return h.holds == nil || h.holds(body)
+}
+
+// Dir is the folder of the program in the foreground of the pane a key names, or empty
+// when its host doesn't know it.
+func Dir(key string) string {
+	h, body := lookup(hosts, key)
+	if h.dir == nil {
+		return ""
+	}
+	return h.dir(body)
+}
+
+// lineage is cairn's process and its ancestors, nearest first.
+func lineage() []int {
+	out, err := cli("", "ps", "-A", "-o", "pid=,ppid=")
+	if err != nil {
+		return nil
+	}
+	parent := map[int]int{}
+	for line := range strings.Lines(string(out)) {
+		var pid, ppid int
+		if _, err := fmt.Sscan(line, &pid, &ppid); err == nil {
+			parent[pid] = ppid
+		}
+	}
+	var pids []int
+	for pid := os.Getpid(); pid > 1 && !slices.Contains(pids, pid); pid = parent[pid] {
+		pids = append(pids, pid)
+	}
+	return pids
 }
 
 // lookup is the host a stored key belongs to, by its prefix, and the key's body; a key

@@ -65,7 +65,7 @@ func (m *panel) Init() tea.Cmd { return tea.Batch(tea.Raw(altScrollOn), m.cached
 func (m *panel) cached() tea.Cmd {
 	target, dir, a := m.target, m.dir, m.app
 	return func() tea.Msg {
-		b := a.load(a.Find("", target, dir))
+		b := a.load(a.findPane(target, dir))
 		a.readPRs(b)
 		return cachedMsg{b}
 	}
@@ -76,7 +76,7 @@ func (m *panel) refresh(force bool) tea.Cmd {
 	gen, target, dir, a := m.gen, m.target, m.dir, m.app
 	return func() tea.Msg {
 		// The pane follows whichever session last ran there.
-		return refreshedMsg{gen, a.gather(a.Find("", target, dir), force)}
+		return refreshedMsg{gen, a.gather(a.findPane(target, dir), force)}
 	}
 }
 

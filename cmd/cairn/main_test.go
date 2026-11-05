@@ -27,8 +27,10 @@ func testApp(t *testing.T, known map[string]github.PR) ui.App {
 	}
 	app := newApp(filepath.Join(dir, "cairn"))
 	app.Title = func(string) string { return "" }
+	app.Dir = nil
 	app.Sessions.Tab = func() string { return "" }
 	app.Sessions.Label = func() string { return "" }
+	app.Sessions.Holds = func(string) bool { return true }
 	app.Cache.Query = func(urls []string) (map[string]github.PR, error) {
 		got := map[string]github.PR{}
 		for _, u := range urls {

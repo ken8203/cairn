@@ -162,11 +162,22 @@ func TestHookSessionStart(t *testing.T) {
 		}
 	}
 	want := `{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"cairn: this session is on trail t, 1/2 steps done, next \"flag on\". Run ` + "`cairn`" + ` to see it; ` + "`cairn skills get cairn`" + ` has the guide."}}` + "\n"
-	if out := runHookBin(t, dir, append(env, "REX_BLOCK=block:p1"), start); out != want {
-		t.Errorf("got  %s\nwant %s", out, want)
+	// Rex's block p1 runs the hook, its caller; p2 is another tab's.
+	bin := t.TempDir()
+	rex := `#!/bin/sh
+case "$*" in *block:p1*) echo "{\"foreground\":{\"pid\":$PPID}}" ;; *) echo '{"foreground":{"pid":1}}' ;; esac
+`
+	if err := os.WriteFile(filepath.Join(bin, "rex"), []byte(rex), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	if got := readName(filepath.Join(state, "panes", "p1")); got != "s1" {
-		t.Errorf("pane points at %q", got)
+	env = append(env, "PATH="+bin+":/usr/bin:/bin")
+	for pane, points := range map[string]string{"p1": "s1", "p2": ""} {
+		if out := runHookBin(t, dir, append(env, "REX_BLOCK=block:"+pane), start); out != want {
+			t.Errorf("got  %s\nwant %s", out, want)
+		}
+		if got := readName(filepath.Join(state, "panes", pane)); got != points {
+			t.Errorf("pane %s points at %q, want %q", pane, got, points)
+		}
 	}
 }
 

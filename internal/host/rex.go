@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -18,6 +19,8 @@ var rex = host{
 	tab:   func() string { return rexWindow(Key(os.Getenv("REX_BLOCK"))) },
 	label: func() string { return rexLabel(os.Getenv("REX_SESSION")) },
 	title: rexTitle,
+	holds: rexHolds,
+	dir:   func(block string) string { return rexProcessOf(block).Foreground.Cwd },
 	panel: rexPanel,
 }
 
@@ -38,6 +41,27 @@ func rexTitle(block string) string {
 	}
 	decode(&res, rexBin(), "block", "call", "-s", os.Getenv("REX_SESSION"), "-b", "block:"+block, "title", "{}")
 	return res.Title
+}
+
+// rexProcess is what Rex knows of the program in the foreground of a block.
+type rexProcess struct {
+	Foreground struct {
+		PID int    `json:"pid"`
+		Cwd string `json:"cwd"`
+	} `json:"foreground"`
+}
+
+func rexProcessOf(block string) rexProcess {
+	var p rexProcess
+	decode(&p, rexBin(), "block", "call", "-s", os.Getenv("REX_SESSION"), "-b", "block:"+block, "process", "{}")
+	return p
+}
+
+// rexHolds reports whether the block's foreground program is cairn or its ancestor, as
+// a Codex app-server holding another block's $REX_BLOCK is not.
+func rexHolds(block string) bool {
+	pid := rexProcessOf(block).Foreground.PID
+	return pid != 0 && slices.Contains(lineage(), pid)
 }
 
 // rexDefaultSuffix is how much of a window's id Rex puts in the label it gives a window

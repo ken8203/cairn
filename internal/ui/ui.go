@@ -50,6 +50,8 @@ type App struct {
 	Cache    github.Cache
 	// Title is the title of the pane a stored key names, in whichever host it belongs to.
 	Title func(pane string) string
+	// Dir is the folder of the program in a pane, where its host knows it; nil knows none.
+	Dir func(pane string) string
 	// Spawn starts a detached `cairn <args>`, which runs the statusline's refresh.
 	Spawn func(args ...string) error
 }
@@ -64,6 +66,20 @@ func Editor(file string) *exec.Cmd {
 // dir; see session.Store.Find.
 func (a App) Find(agent, pane, dir string) session.Found {
 	return a.Sessions.Find(agent, pane, dir, a.Head)
+}
+
+// findPane is what the panel shows for a pane: the trail of the session it last ran, else
+// of the folder dir, else of the folder of the program in it.
+func (a App) findPane(pane, dir string) session.Found {
+	f := a.Find("", pane, dir)
+	if f.Trail == "" && a.Dir != nil {
+		if d := a.Dir(pane); d != "" && d != dir {
+			if g := a.Find("", pane, d); g.Trail != "" {
+				return g
+			}
+		}
+	}
+	return f
 }
 
 // Head is a PR's cached head branch, empty until fetched.
